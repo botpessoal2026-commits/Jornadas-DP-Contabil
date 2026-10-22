@@ -31,6 +31,9 @@ test("demonstração: calendário, edições, exportações, duplicação e cada
   }
   await page.getByRole("gridcell").first().click();
   await page
+    .getByRole("button", { name: "Editar períodos adicionais em texto" })
+    .click();
+  await page
     .getByRole("textbox", { name: "Intervalos de trabalho (vazio = folga)" })
     .fill("08:00-12:00, 13:00-18:00");
   await page.getByRole("button", { name: "Salvar na prévia" }).click();
