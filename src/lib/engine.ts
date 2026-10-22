@@ -1,3 +1,4 @@
+import { periodForAlert } from "./alerts";
 import type {
   Alert,
   Company,
@@ -201,6 +202,8 @@ export function evaluate(
       source:
         r?.fonte ?? "Cadastre uma regra e sua fonte em Parâmetros legais.",
       severity,
+      ruleId: r?.id,
+      period: periodForAlert({ code, date }),
     });
   const contract = employee?.carga_semanal_minutos;
   const validContract =
@@ -376,6 +379,7 @@ export function evaluate(
         alerts.push({
           date: reference,
           code: "contrato_semanal",
+          period: { start, end: addDays(start, 6) },
           severity: "erro",
           message: `${employee!.nome}: semana ${start}, ${formatMinutes(total)} supera a carga contratual de ${formatMinutes(contract!)}. Revise horários e instrumento aplicável.`,
           rule: "Carga semanal contratual",

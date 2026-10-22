@@ -71,6 +71,8 @@ export type Schedule = {
   modelo_tipo?: Model["tipo"];
 };
 export type Alert = {
+  ruleId?: string;
+  period?: { start: string; end: string };
   date: string;
   code: string;
   message: string;
