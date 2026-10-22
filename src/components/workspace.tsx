@@ -69,6 +69,7 @@ import type {
   Shift,
   WeekPattern,
 } from "@/lib/types";
+import { contractMinutesFromHours } from "@/lib/contract";
 import { demoData } from "@/lib/demo";
 import LegalFields from "./legal-fields";
 import { exportCSV, exportExcel, exportPDF } from "@/lib/exports";
@@ -396,9 +397,10 @@ export default function Workspace() {
             company,
             schedule.mes,
             schedule.modelo_tipo,
+            data.employees.find((e) => e.id === schedule.funcionario_id),
           )
         : null,
-    [schedule, company, data.rules],
+    [schedule, company, data.rules, data.employees],
   );
   const pendingRules = data.rules.filter((r) => !r.confirmado).length;
   const changeContext = (callback: () => void) => {
@@ -659,6 +661,9 @@ export default function Workspace() {
             nome: pick(fd, "nome"),
             cargo: pick(fd, "cargo"),
             horario_contratual: pick(fd, "horario"),
+            carga_semanal_minutos: contractMinutesFromHours(
+              pick(fd, "carga_semanal"),
+            ),
             dias_descanso: fd.getAll("descanso").map(Number),
           },
           id,
@@ -1563,6 +1568,9 @@ export default function Workspace() {
                                   schedule,
                                   data.rules,
                                   company,
+                                  data.employees.find(
+                                    (e) => e.id === schedule.funcionario_id,
+                                  ),
                                 );
                             })
                           }
@@ -1573,7 +1581,15 @@ export default function Workspace() {
                         <button
                           className="button small"
                           disabled={busy}
-                          onClick={() => exportCSV(schedule, data.rules)}
+                          onClick={() =>
+                            exportCSV(
+                              schedule,
+                              data.rules,
+                              data.employees.find(
+                                (e) => e.id === schedule.funcionario_id,
+                              ),
+                            )
+                          }
                         >
                           <Download size={14} />
                           CSV
@@ -1968,7 +1984,15 @@ export default function Workspace() {
                                 )?.nome
                               }
                             </td>
-                            <td>{e.horario_contratual || "Não informado"}</td>
+                            <td>
+                              {e.carga_semanal_minutos
+                                ? `${formatMinutes(e.carga_semanal_minutos)} / semana`
+                                : "Carga pendente de revisão"}
+                              <small className="muted">
+                                {e.horario_contratual ||
+                                  "Sem observações contratuais"}
+                              </small>
+                            </td>
                             <td>
                               {e.dias_descanso
                                 .map((d) => dayNames[d].slice(0, 3))
@@ -2512,7 +2536,26 @@ export default function Workspace() {
                       defaultValue={String(modal.row?.cargo ?? "")}
                     />
                   </Field>
-                  <Field label="Horário contratual">
+                  <Field label="Carga semanal contratual (horas)">
+                    <input
+                      name="carga_semanal"
+                      type="number"
+                      min={1 / 60}
+                      max="168"
+                      step="any"
+                      placeholder="Ex.: 30 ou 30,5"
+                      defaultValue={
+                        typeof modal.row?.carga_semanal_minutos === "number"
+                          ? modal.row.carga_semanal_minutos / 60
+                          : ""
+                      }
+                    />
+                    <small className="muted">
+                      Deixe vazio se depender de revisão. 30,5 horas = 30h30.
+                      Não autoriza exceções legais.
+                    </small>
+                  </Field>
+                  <Field label="Horário contratual / observações">
                     <input
                       name="horario"
                       placeholder="Ex.: 42h semanais, seg a sex"

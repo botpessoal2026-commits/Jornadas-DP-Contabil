@@ -79,17 +79,52 @@ test("demonstração: calendário, edições, exportações, duplicação e cada
   ).toBeVisible();
   expect(errors).toEqual([]);
 });
-test("mobile: menu acessível e calendário sem rolagem horizontal da página", async ({
+for (const width of [375, 390]) {
+  test(`mobile ${width}px: menu acessível e calendário sem rolagem horizontal da página`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width, height: 844 });
+    await page.goto("/");
+    await page.getByRole("button", { name: "Explorar demonstração" }).click();
+    await page.getByRole("button", { name: "Abrir menu" }).click();
+    await page.getByRole("button", { name: "Escalas mensais" }).click();
+    await expect(page.getByRole("gridcell")).toHaveCount(31);
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth),
+    ).toBeLessThanOrEqual(width);
+    await page.screenshot({ path: "/tmp/jornadas-mobile.png", fullPage: true });
+  });
+}
+
+test("carga contratual editável reabre e gera alertas sem substituir observações", async ({
   page,
 }) => {
-  await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/");
   await page.getByRole("button", { name: "Explorar demonstração" }).click();
-  await page.getByRole("button", { name: "Abrir menu" }).click();
+  await page.getByRole("button", { name: "Funcionários", exact: true }).click();
+  const row = page.getByRole("row").filter({ hasText: "Mariana Costa" });
+  await row.getByRole("button", { name: "Editar", exact: true }).click();
+  await page
+    .getByRole("spinbutton", { name: "Carga semanal contratual (horas)" })
+    .fill("30");
+  await page
+    .getByRole("button", { name: "Salvar cadastro", exact: true })
+    .click();
+  await expect(
+    row.getByRole("cell").filter({ hasText: "30h00 / semana" }),
+  ).toBeVisible();
+  await expect(
+    row.getByText("42 horas semanais", { exact: true }),
+  ).toBeVisible();
+  await row.getByRole("button", { name: "Editar", exact: true }).click();
+  await expect(
+    page.getByRole("spinbutton", { name: "Carga semanal contratual (horas)" }),
+  ).toHaveValue("30");
+  await page
+    .getByRole("button", { name: "Salvar cadastro", exact: true })
+    .click();
   await page.getByRole("button", { name: "Escalas mensais" }).click();
-  await expect(page.getByRole("gridcell")).toHaveCount(31);
-  expect(
-    await page.evaluate(() => document.documentElement.scrollWidth),
-  ).toBeLessThanOrEqual(390);
-  await page.screenshot({ path: "/tmp/jornadas-mobile.png", fullPage: true });
+  await expect(
+    page.getByText(/supera a carga contratual de 30h00/).first(),
+  ).toBeVisible();
 });

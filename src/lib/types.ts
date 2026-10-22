@@ -22,6 +22,7 @@ export type Employee = {
   nome: string;
   cargo: string;
   horario_contratual: string;
+  carga_semanal_minutos?: number | null;
   dias_descanso: number[];
 };
 export type Model = {

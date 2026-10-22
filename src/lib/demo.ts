@@ -1,4 +1,9 @@
-import { initialModels, initialRules, initialHolidays } from "./presets";
+import {
+  initialModels,
+  initialRules,
+  initialHolidays,
+  demonstrationRules,
+} from "./presets";
 import type { Data } from "./store";
 import { generateDays } from "./engine";
 export function demoData(): Data {
@@ -19,6 +24,7 @@ export function demoData(): Data {
     nome: "Mariana Costa",
     cargo: "Assistente administrativo",
     horario_contratual: "42 horas semanais",
+    carga_semanal_minutos: 2520,
     dias_descanso: [0, 6],
   };
   const models = initialModels.map((m, i) => ({ ...m, id: `demo-model-${i}` }));
@@ -30,7 +36,10 @@ export function demoData(): Data {
     companies: [company],
     employees: [employee],
     models,
-    rules: initialRules.map((r, i) => ({ ...r, id: `demo-rule-${i}` })),
+    rules: [...initialRules, ...demonstrationRules].map((r, i) => ({
+      ...r,
+      id: `demo-rule-${i}`,
+    })),
     holidays,
     schedules: [
       {

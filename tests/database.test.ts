@@ -27,6 +27,31 @@ test("migration real: RLS, isolamento entre contas, auditoria e gravação atôm
       `insert into public.funcionarios(id,empresa_id,nome) values($1,$2,'Pessoa A')`,
       [employee, company],
     );
+    await db.exec("reset role");
+    await db.exec(
+      await readFile(
+        "supabase/migrations/20261022172216_structured_contract.sql",
+        "utf8",
+      ),
+    );
+    await db.exec("set role authenticated");
+    const legacy = await db.query<{ carga_semanal_minutos: number | null }>(
+      "select carga_semanal_minutos from public.funcionarios where id=$1",
+      [employee],
+    );
+    assert.equal(legacy.rows[0].carga_semanal_minutos, null);
+    await db.query(
+      "update public.funcionarios set carga_semanal_minutos=1800, horario_contratual='30 h/semana' where id=$1",
+      [employee],
+    );
+    for (const invalid of [0, -1, 10081])
+      await assert.rejects(
+        db.query(
+          "update public.funcionarios set carga_semanal_minutos=$1 where id=$2",
+          [invalid, employee],
+        ),
+        /check constraint/i,
+      );
     await assert.rejects(
       db.exec("truncate public.empresas cascade"),
       /permission denied/i,
@@ -34,7 +59,7 @@ test("migration real: RLS, isolamento entre contas, auditoria e gravação atôm
     let log = await db.query<{ n: number }>(
       "select count(*)::int n from public.log_alteracoes",
     );
-    assert.equal(log.rows[0].n, 2);
+    assert.equal(log.rows[0].n, 3);
     await assert.rejects(
       db.exec(
         `insert into public.log_alteracoes(user_id,tabela,registro_id,acao) values('${u1}','empresas','${company}','INSERT')`,
@@ -42,6 +67,20 @@ test("migration real: RLS, isolamento entre contas, auditoria e gravação atôm
       /permission denied/i,
     );
     await db.exec(`select set_config('request.jwt.claim.sub','${u2}',false)`);
+    assert.equal(
+      (await db.query("select carga_semanal_minutos from public.funcionarios"))
+        .rows.length,
+      0,
+    );
+    assert.equal(
+      (
+        await db.query(
+          "update public.funcionarios set carga_semanal_minutos=2520 where id=$1 returning id",
+          [employee],
+        )
+      ).rows.length,
+      0,
+    );
     const hidden = await db.query("select * from public.empresas");
     assert.equal(hidden.rows.length, 0);
     const changed = await db.query(
@@ -64,6 +103,15 @@ test("migration real: RLS, isolamento entre contas, auditoria e gravação atôm
       /row-level security/i,
     );
     await db.exec(`select set_config('request.jwt.claim.sub','${u1}',false)`);
+    const persisted = await db.query<{
+      carga_semanal_minutos: number;
+      horario_contratual: string;
+    }>(
+      "select carga_semanal_minutos,horario_contratual from public.funcionarios where id=$1",
+      [employee],
+    );
+    assert.equal(persisted.rows[0].carga_semanal_minutos, 1800);
+    assert.equal(persisted.rows[0].horario_contratual, "30 h/semana");
     const s = {
       empresa_id: company,
       funcionario_id: employee,

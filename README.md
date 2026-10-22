@@ -8,7 +8,7 @@ Aplicação em português para o Departamento Pessoal organizar empresas, funcio
 - Demonstração usa dados fictícios em memória e nunca acessa dados reais.
 - Sem variáveis do Supabase, login e gravação remota ficam indisponíveis; não existe fallback silencioso de dados reais para armazenamento local.
 - Criação do projeto Supabase, aplicação da migration no serviço e publicação Vercel dependem do acesso às respectivas contas. Nenhum projeto pago é criado pelo código.
-- Não foi validada a existência/conteúdo da EC nº 141/2026 descrita no pedido. As fases de 42h/40h são propostas editáveis, pendentes de conferência, não afirmações legais.
+- Não foi validada a existência/conteúdo da EC nº 141/2026 descrita no pedido (consulta oficial sem resposta nesta execução). As hipóteses de 42h/40h são exclusivas da demonstração e dos testes; não são importadas para o banco real. Regras já cadastradas não foram alteradas.
 
 ## Executar
 
@@ -90,7 +90,7 @@ Os descansos do cadastro do funcionário são contratuais. O modelo escolhido de
 `src/lib/engine.ts` recebe os parâmetros do banco; não importa valores legais dos cadastros iniciais. `src/lib/presets.ts` contém apenas sugestões editáveis para primeiro cadastro e exemplos da demonstração. Grupos: regime, intervalo, interjornada, noturno e divisor. A regra de cada grupo com vigência mais recente, não posterior à data analisada, é usada. Regras não conferidas participam da simulação e sempre geram aviso com fonte; a aplicação não as certifica.
 
 - **42h e divisor 210:** seg–sex, 08:00–12:00 e 13:00–17:24 somam 2520 minutos; o divisor usa o fator cadastrado. O total real do calendário e o divisor são apresentados separadamente.
-- **Dezembro/2026:** a referência inicial sugere 44h até 14/12 e 42h a partir de 15/12. A data pode ser alterada para 16/12 ou outra data após conferência.
+- **Dezembro/2026:** somente a demonstração usa uma hipótese de corte entre 44h e 42h. Essas datas são fixtures de simulação, sem confirmação jurídica; a importação real não inclui essas fases.
 - **40h:** 01/12/2027 é uma data estimada de cadastro, explicitamente não confirmada. O parâmetro `permite_limite_empresa=false` impede que o limite diário da empresa amplie o teto desta fase.
 - **Transição semanal:** semana civil segunda–domingo; aplica-se preventivamente o menor teto da semana, com alerta que explica a política. Não se afirma que esta seja a regra jurídica de proporcionalização. Confira a CCT/ato oficial.
 - **Limites diários:** considera tanto o trabalho por data civil quanto a jornada iniciada na data, evitando que atravessar meia-noite esconda uma jornada longa.
@@ -129,3 +129,16 @@ Esses testes não substituem a validação de Auth, SMTP, migrations e deploy no
 - Banco de horas, prazos e instrumentos de compensação.
 
 A aplicação oferece planejamento e alertas, não parecer jurídico nem cálculo completo de folha.
+
+
+## Entrega parcial P0: carga contratual estruturada
+
+O cadastro do funcionário possui carga semanal explícita em horas decimais (30,5 = 30h30), persistida em `funcionarios.carga_semanal_minutos`. O texto contratual continua preservado. Cadastros antigos permanecem com carga nula até revisão; não há backfill automático. A faixa técnica de 1 a 10080 minutos não representa autorização legal de jornada.
+
+A conferência compara a semana completa, incluindo dias adjacentes e horas noturnas reduzidas parametrizadas, com o contrato do funcionário. Excesso gera erro com pessoa, semana, total e orientação de revisão. Ausência de carga gera aviso. PDF e XLSX recebem os mesmos alertas contratuais; CSV e XLSX incluem a carga estruturada. O contrato atual é usado na conferência: ainda não existe histórico de vigência contratual ou snapshot por revisão.
+
+Antes de executar a aplicação atualizada contra um ambiente Supabase de teste, aplique também `supabase/migrations/20261022172216_structured_contract.sql` nesse ambiente, após a migration original. Em instalações existentes, aplique somente a nova migration pendente, preservando o histórico. Ela adiciona uma coluna nullable com CHECK e reutiliza RLS e auditoria existentes. A migration não foi aplicada a banco remoto nesta entrega. A interface nova depende dessa coluna para salvar funcionários.
+
+Validação local: 31 testes unitários/de banco PGlite, 4 testes Playwright (incluindo 375px e 390px), typecheck, verificação de formatação e build. Não há script de lint configurado. O teste de banco cria um cadastro legado antes da nova migration, verifica preservação, gravação/leitura, restrições e isolamento de duas contas. Playwright usa demonstração em memória, sem simular persistência remota.
+
+Pendente: fluxo rascunho → conferência → aprovação → publicação com validação no servidor, papéis de aprovador, revisão imutável de publicadas, escopo jurídico por categoria/CCT e atualização legal oficialmente confirmada; depois dashboard, calendários Dia/Semana, editor de campos separados, lote e modelos avançados. Esta entrega não implementa aprovação e não declara conformidade legal.

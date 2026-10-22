@@ -20,41 +20,6 @@ export const initialRules: Omit<LegalRule, "id">[] = [
     confirmado: false,
   },
   {
-    nome: "Proposta 42h / 5x2 — conferir vigência",
-    chave: "regime",
-    valor: {
-      limite_semanal_minutos: 2520,
-      limite_diario_minutos: 480,
-      permite_limite_empresa: true,
-      descansos_semanais: 2,
-      preferir_domingo: true,
-    },
-    inicio_vigencia: "2026-12-15",
-    fonte:
-      "Informação do solicitante — publicação oficial ainda não verificada.",
-    observacao:
-      proposed +
-      " Há divergência entre 15 e 16/12. 8h24 exige limite diário e CCT compatíveis.",
-    confirmado: false,
-  },
-  {
-    nome: "Proposta 40h / 5x2 — data estimada",
-    chave: "regime",
-    valor: {
-      limite_semanal_minutos: 2400,
-      limite_diario_minutos: 480,
-      permite_limite_empresa: false,
-      descansos_semanais: 2,
-      preferir_domingo: true,
-    },
-    inicio_vigencia: "2027-12-01",
-    fonte: "Informação do solicitante — data estimada, não confirmada.",
-    observacao:
-      proposed +
-      " 01/12/2027 é apenas uma referência editável, não uma data legal validada.",
-    confirmado: false,
-  },
-  {
     nome: "Intervalo intrajornada — referência CLT",
     chave: "intervalo",
     valor: {
@@ -103,6 +68,44 @@ export const initialRules: Omit<LegalRule, "id">[] = [
     fonte: "Fórmula solicitada: horas semanais × 5. Conferir categoria e CCT.",
     observacao:
       "Divisor não corresponde ao total efetivamente trabalhado no calendário.",
+    confirmado: false,
+  },
+];
+// Hipóteses visuais e fixtures de teste; nunca importadas para o banco real.
+export const demonstrationRules: Omit<LegalRule, "id">[] = [
+  {
+    nome: "Proposta 42h / 5x2 — conferir vigência",
+    chave: "regime",
+    valor: {
+      limite_semanal_minutos: 2520,
+      limite_diario_minutos: 480,
+      permite_limite_empresa: true,
+      descansos_semanais: 2,
+      preferir_domingo: true,
+    },
+    inicio_vigencia: "2026-12-15",
+    fonte:
+      "Informação do solicitante — publicação oficial ainda não verificada.",
+    observacao:
+      proposed +
+      " Há divergência entre 15 e 16/12. 8h24 exige limite diário e CCT compatíveis.",
+    confirmado: false,
+  },
+  {
+    nome: "Proposta 40h / 5x2 — data estimada",
+    chave: "regime",
+    valor: {
+      limite_semanal_minutos: 2400,
+      limite_diario_minutos: 480,
+      permite_limite_empresa: false,
+      descansos_semanais: 2,
+      preferir_domingo: true,
+    },
+    inicio_vigencia: "2027-12-01",
+    fonte: "Informação do solicitante — data estimada, não confirmada.",
+    observacao:
+      proposed +
+      " 01/12/2027 é apenas uma referência editável, não uma data legal validada.",
     confirmado: false,
   },
 ];
