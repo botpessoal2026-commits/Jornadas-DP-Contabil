@@ -1,5 +1,4 @@
 begin;
-create extension if not exists pgcrypto;
 create table public.empresas (
  id uuid primary key default gen_random_uuid(), user_id uuid not null default auth.uid() references auth.users(id) on delete cascade,
  nome text not null check (length(trim(nome))>0), cnpj text not null check (cnpj ~ '^\d{14}$'), cidade text not null, uf text not null check(uf ~ '^[A-Z]{2}$'), cct text not null default '',
@@ -53,18 +52,22 @@ do $$ declare t text; begin
   execute format('alter table public.%I enable row level security',t);
   execute format('create policy dono on public.%I for all to authenticated using ((select auth.uid())=user_id) with check ((select auth.uid())=user_id)',t);
   execute format('create index on public.%I(user_id)',t);
+  execute format('revoke all on public.%I from anon,authenticated',t);
   execute format('grant select,insert,update,delete on public.%I to authenticated',t);
-  execute format('revoke all on public.%I from anon',t);
  end loop;
 end $$;
 alter table public.log_alteracoes enable row level security;
 create policy leitura_dono on public.log_alteracoes for select to authenticated using((select auth.uid())=user_id);
+revoke all on public.log_alteracoes from anon,authenticated;
 grant select on public.log_alteracoes to authenticated;
-revoke insert,update,delete on public.log_alteracoes from anon,authenticated;
 -- Registra nomes dos campos, sem duplicar dados pessoais no log.
 create or replace function public.auditar_alteracao() returns trigger language plpgsql security definer set search_path='' as $$
 declare row_data jsonb; begin
  row_data:=case when TG_OP='DELETE' then to_jsonb(OLD) else to_jsonb(NEW) end;
+ -- Exclusão da conta remove dados e logs por cascata; não recriar logs órfãos.
+ if not exists(select 1 from auth.users where id=(row_data->>'user_id')::uuid) then
+  if TG_OP='DELETE' then return OLD; end if; return NEW;
+ end if;
  insert into public.log_alteracoes(user_id,tabela,registro_id,acao,campos) values((row_data->>'user_id')::uuid,TG_TABLE_NAME,(row_data->>'id')::uuid,TG_OP,array(select jsonb_object_keys(row_data)));
  if TG_OP='DELETE' then return OLD; end if; return NEW;
 end $$;
