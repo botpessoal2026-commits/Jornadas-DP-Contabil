@@ -36,7 +36,7 @@ import {
   LoaderCircle,
 } from "lucide-react";
 import type { User } from "@supabase/supabase-js";
-import { supabase } from "@/lib/supabase";
+import { supabase, demoOnly } from "@/lib/supabase";
 import {
   emptyData,
   importDefaults,
@@ -836,91 +836,107 @@ export default function Workspace() {
           <div className="login-box">
             <div className="eyebrow">GERADOR DE JORNADAS</div>
             <h1>
-              {authMode === "signup"
-                ? "Crie seu acesso"
-                : authMode === "reset"
-                  ? "Recupere seu acesso"
-                  : authMode === "password"
-                    ? "Defina uma nova senha"
-                    : "Bem-vindo ao seu DP"}
+              {demoOnly
+                ? "Demonstração pessoal"
+                : authMode === "signup"
+                  ? "Crie seu acesso"
+                  : authMode === "reset"
+                    ? "Recupere seu acesso"
+                    : authMode === "password"
+                      ? "Defina uma nova senha"
+                      : "Bem-vindo ao seu DP"}
             </h1>
             <p className="subtitle">
-              {authMode === "login"
-                ? "Entre para organizar as jornadas das suas empresas."
-                : "Use seu e-mail de trabalho para continuar."}
+              {demoOnly
+                ? "Explore o planejamento de jornadas com dados fictícios."
+                : authMode === "login"
+                  ? "Entre para organizar as jornadas das suas empresas."
+                  : "Use seu e-mail de trabalho para continuar."}
             </p>
             {!supabase && (
               <div className="banner mt-6">
                 <AlertTriangle size={18} />
                 <div>
-                  A conexão com o Supabase ainda não foi configurada. Você pode
-                  explorar a demonstração com dados fictícios.
+                  {demoOnly
+                    ? "Esta versão é uma demonstração pessoal. As alterações ficam somente nesta sessão, sem acesso a cadastros reais."
+                    : "A conexão com o Supabase ainda não foi configurada. Você pode explorar a demonstração com dados fictícios."}
                 </div>
               </div>
             )}
-            <form onSubmit={authSubmit}>
-              {authMode !== "password" && (
-                <Field label="E-mail">
-                  <input
-                    name="email"
-                    type="email"
-                    placeholder="voce@contabilidade.com.br"
-                    required
-                    autoComplete="email"
-                  />
-                </Field>
-              )}
-              {authMode !== "reset" && (
-                <Field label="Senha">
-                  <input
-                    name="password"
-                    type="password"
-                    minLength={8}
-                    required
-                    autoComplete={
-                      authMode === "login" ? "current-password" : "new-password"
+            {!demoOnly && (
+              <>
+                <form onSubmit={authSubmit}>
+                  {authMode !== "password" && (
+                    <Field label="E-mail">
+                      <input
+                        name="email"
+                        type="email"
+                        placeholder="voce@contabilidade.com.br"
+                        required
+                        autoComplete="email"
+                      />
+                    </Field>
+                  )}
+                  {authMode !== "reset" && (
+                    <Field label="Senha">
+                      <input
+                        name="password"
+                        type="password"
+                        minLength={8}
+                        required
+                        autoComplete={
+                          authMode === "login"
+                            ? "current-password"
+                            : "new-password"
+                        }
+                        placeholder="Pelo menos 8 caracteres"
+                      />
+                    </Field>
+                  )}
+                  <button
+                    className="button primary"
+                    disabled={busy || !supabase}
+                  >
+                    {busy ? (
+                      <LoaderCircle size={16} className="animate-spin" />
+                    ) : null}
+                    {authMode === "signup"
+                      ? "Criar conta"
+                      : authMode === "reset"
+                        ? "Enviar instruções"
+                        : authMode === "password"
+                          ? "Salvar senha"
+                          : "Entrar"}
+                    <ArrowRight size={15} />
+                  </button>
+                </form>
+                <div className="actions justify-between mt-5">
+                  <button
+                    className="icon-button text-xs"
+                    onClick={() =>
+                      setAuthMode(authMode === "signup" ? "login" : "signup")
                     }
-                    placeholder="Pelo menos 8 caracteres"
-                  />
-                </Field>
-              )}
-              <button className="button primary" disabled={busy || !supabase}>
-                {busy ? (
-                  <LoaderCircle size={16} className="animate-spin" />
-                ) : null}
-                {authMode === "signup"
-                  ? "Criar conta"
-                  : authMode === "reset"
-                    ? "Enviar instruções"
-                    : authMode === "password"
-                      ? "Salvar senha"
-                      : "Entrar"}
-                <ArrowRight size={15} />
-              </button>
-            </form>
-            <div className="actions justify-between mt-5">
-              <button
-                className="icon-button text-xs"
-                onClick={() =>
-                  setAuthMode(authMode === "signup" ? "login" : "signup")
-                }
-              >
-                {authMode === "signup" ? "Já tenho uma conta" : "Criar conta"}
-              </button>
-              <button
-                className="icon-button text-xs"
-                onClick={() =>
-                  setAuthMode(authMode === "reset" ? "login" : "reset")
-                }
-              >
-                {authMode === "reset"
-                  ? "Voltar ao login"
-                  : "Esqueci minha senha"}
-              </button>
-            </div>
+                  >
+                    {authMode === "signup"
+                      ? "Já tenho uma conta"
+                      : "Criar conta"}
+                  </button>
+                  <button
+                    className="icon-button text-xs"
+                    onClick={() =>
+                      setAuthMode(authMode === "reset" ? "login" : "reset")
+                    }
+                  >
+                    {authMode === "reset"
+                      ? "Voltar ao login"
+                      : "Esqueci minha senha"}
+                  </button>
+                </div>
+              </>
+            )}
             <div className="mt-7 border-t border-[#dce5dc] pt-6">
               <button
-                className="button w-full"
+                className={`button w-full ${demoOnly ? "primary" : ""}`}
                 onClick={() => {
                   setData(demoData());
                   setMonth("2026-12");

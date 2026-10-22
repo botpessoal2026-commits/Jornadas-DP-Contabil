@@ -5,6 +5,14 @@ test("demonstração: calendário, edições, exportações, duplicação e cada
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
   await page.goto("/");
+  if (process.env.NEXT_PUBLIC_DEMO_ONLY === "true") {
+    await expect(
+      page.getByRole("heading", { name: "Demonstração pessoal", exact: true }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("textbox", { name: "E-mail", exact: true }),
+    ).toHaveCount(0);
+  }
   await page.getByRole("button", { name: "Explorar demonstração" }).click();
   await expect(
     page.getByRole("heading", { name: "Seu mês, bem planejado." }),

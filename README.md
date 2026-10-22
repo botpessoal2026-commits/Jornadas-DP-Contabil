@@ -30,6 +30,12 @@ Variáveis do frontend:
 
 As variáveis `NEXT_PUBLIC_` são públicas e incorporadas no build. Depois de alterá-las na Vercel, faça novo deploy. Não comite `.env.local` nem credenciais. Este aplicativo não precisa de chave administrativa em produção.
 
+## Demonstração pessoal na Vercel
+
+Use `NEXT_PUBLIC_DEMO_ONLY=true` no ambiente de build para publicar apenas a demonstração pessoal. Nessa modalidade, a aplicação não instancia o cliente Supabase nem oferece login/cadastro; trabalha somente com dados fictícios em memória. É preciso um novo build após mudar a variável. Não use esta modalidade para armazenar dados de funcionários reais.
+
+O projeto da Vercel deve usar o preset **Next.js**, sem substituir o diretório de saída pelo `public`. O arquivo `vercel.json` registra o preset e os comandos para evitar o erro `STATIC_BUILD_NO_OUT_DIR`. O plano Hobby é restrito pela Vercel a uso pessoal e não comercial; confirme um plano compatível antes de usar no escritório.
+
 ## Banco e autenticação
 
 Aplique `supabase/migrations/202610220001_schema.sql` em um **projeto Supabase novo**, pelo SQL Editor ou pelo CLI oficialmente autenticado:
