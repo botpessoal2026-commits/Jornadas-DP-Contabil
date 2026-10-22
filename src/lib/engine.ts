@@ -1,6 +1,8 @@
+import { periodForAlert } from "./alerts";
 import type {
   Alert,
   Company,
+  Employee,
   Day,
   Holiday,
   LegalRule,
@@ -180,6 +182,7 @@ export function evaluate(
   company: Company,
   month: string,
   modelType?: Model["tipo"],
+  employee?: Employee,
 ) {
   const alerts: Alert[] = [];
   const ordered = [...days].sort((a, b) => a.data.localeCompare(b.data));
@@ -199,7 +202,23 @@ export function evaluate(
       source:
         r?.fonte ?? "Cadastre uma regra e sua fonte em Parâmetros legais.",
       severity,
+      ruleId: r?.id,
+      period: periodForAlert({ code, date }),
     });
+  const contract = employee?.carga_semanal_minutos;
+  const validContract =
+    typeof contract === "number" &&
+    Number.isInteger(contract) &&
+    contract > 0 &&
+    contract <= 10080;
+  if (employee && !validContract)
+    alert(
+      selected[0]?.data ?? `${month.slice(0, 7)}-01`,
+      "contrato_pendente",
+      `${employee.nome}: carga semanal contratual não estruturada. Revise o cadastro; o texto não é convertido automaticamente.`,
+      undefined,
+      "aviso",
+    );
   const used = new Set<string>();
   for (const day of ordered) {
     if (!selected.includes(day)) continue;
@@ -356,6 +375,17 @@ export function evaluate(
           rule,
           "aviso",
         );
+      if (validContract && total > contract! + 0.001)
+        alerts.push({
+          date: reference,
+          code: "contrato_semanal",
+          period: { start, end: addDays(start, 6) },
+          severity: "erro",
+          message: `${employee!.nome}: semana ${start}, ${formatMinutes(total)} supera a carga contratual de ${formatMinutes(contract!)}. Revise horários e instrumento aplicável.`,
+          rule: "Carga semanal contratual",
+          source:
+            "Cadastro estruturado do funcionário; conferir contrato e CCT/ACT.",
+        });
       if (limit !== undefined && total > limit + 0.001)
         alert(
           reference,

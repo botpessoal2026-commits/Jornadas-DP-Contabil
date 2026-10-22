@@ -59,7 +59,7 @@ export default function LegalFields({
     Record<string, number | boolean | string>
   >(
     (row?.valor as Record<string, number | boolean | string>) ?? {
-      ...initialRules[1].valor,
+      ...initialRules.find((r) => r.chave === "regime")!.valor,
     },
   );
   return (

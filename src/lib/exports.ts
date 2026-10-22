@@ -1,10 +1,17 @@
 import type { Company, Employee, LegalRule, Schedule } from "./types";
 import { computeDay, evaluate, formatMinutes, span } from "./engine";
-export function exportRows(schedule: Schedule, rules: LegalRule[]) {
+export function exportRows(
+  schedule: Schedule,
+  rules: LegalRule[],
+  employee?: Employee,
+) {
   return schedule.dias
     .filter((d) => d.data.startsWith(schedule.mes.slice(0, 7)))
     .map((d) => ({
       Data: d.data,
+      "Carga contratual semanal": employee?.carga_semanal_minutos
+        ? formatMinutes(employee.carga_semanal_minutos)
+        : "Pendente de revisão",
       Horário:
         d.intervalos
           .map(
@@ -42,9 +49,13 @@ export function csvText(rows: Record<string, string>[]) {
       .join("\r\n")
   );
 }
-export function exportCSV(s: Schedule, rules: LegalRule[]) {
+export function exportCSV(
+  s: Schedule,
+  rules: LegalRule[],
+  employee?: Employee,
+) {
   download(
-    new Blob([csvText(exportRows(s, rules))], {
+    new Blob([csvText(exportRows(s, rules, employee))], {
       type: "text/csv;charset=utf-8",
     }),
     `escala-${s.mes.slice(0, 7)}.csv`,
@@ -54,12 +65,13 @@ export async function excelBuffer(
   s: Schedule,
   rules: LegalRule[],
   company: Company,
+  employee?: Employee,
 ) {
   const { default: ExcelJS } = await import("exceljs");
   const book = new ExcelJS.Workbook();
   book.creator = "Gerador de Jornadas";
   const sheet = book.addWorksheet("Escala");
-  const rows = exportRows(s, rules);
+  const rows = exportRows(s, rules, employee);
   sheet.columns = Object.keys(rows[0] ?? {}).map((key) => ({
     header: key,
     key,
@@ -69,9 +81,22 @@ export async function excelBuffer(
   sheet.getRow(1).font = { bold: true };
   sheet.views = [{ state: "frozen", ySplit: 1 }];
   const summary = book.addWorksheet("Resumo e alertas");
-  const result = evaluate(s.dias, rules, company, s.mes, s.modelo_tipo);
+  const result = evaluate(
+    s.dias,
+    rules,
+    company,
+    s.mes,
+    s.modelo_tipo,
+    employee,
+  );
   summary.addRow(["Empresa", company.nome]);
   summary.addRow(["Funcionário", s.nome_funcionario ?? ""]);
+  summary.addRow([
+    "Carga contratual semanal",
+    employee?.carga_semanal_minutos
+      ? formatMinutes(employee.carga_semanal_minutos)
+      : "Pendente de revisão",
+  ]);
   summary.addRow(["Mês", s.mes.slice(0, 7)]);
   summary.addRow(["Horas computadas", formatMinutes(result.total)]);
   summary.addRow(["Horas de relógio", formatMinutes(result.clockTotal)]);
@@ -94,8 +119,9 @@ export async function exportExcel(
   s: Schedule,
   rules: LegalRule[],
   company: Company,
+  employee?: Employee,
 ) {
-  const buffer = await excelBuffer(s, rules, company);
+  const buffer = await excelBuffer(s, rules, company, employee);
   download(
     new Blob([new Uint8Array(buffer)], {
       type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -112,7 +138,14 @@ export async function pdfDocument(
   const { jsPDF } = await import("jspdf");
   const { default: autoTable } = await import("jspdf-autotable");
   const doc = new jsPDF();
-  const result = evaluate(s.dias, rules, company, s.mes, s.modelo_tipo);
+  const result = evaluate(
+    s.dias,
+    rules,
+    company,
+    s.mes,
+    s.modelo_tipo,
+    employee,
+  );
   doc.setFontSize(18);
   doc.text("Gerador de Jornadas", 14, 18);
   doc.setFontSize(10);
@@ -122,7 +155,7 @@ export async function pdfDocument(
     14,
     32,
   );
-  const rows = exportRows(s, rules);
+  const rows = exportRows(s, rules, employee);
   autoTable(doc, {
     startY: 38,
     head: [["Data", "Horário", "Horas", "Feriado"]],

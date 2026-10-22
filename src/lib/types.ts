@@ -22,6 +22,7 @@ export type Employee = {
   nome: string;
   cargo: string;
   horario_contratual: string;
+  carga_semanal_minutos?: number | null;
   dias_descanso: number[];
 };
 export type Model = {
@@ -70,6 +71,8 @@ export type Schedule = {
   modelo_tipo?: Model["tipo"];
 };
 export type Alert = {
+  ruleId?: string;
+  period?: { start: string; end: string };
   date: string;
   code: string;
   message: string;

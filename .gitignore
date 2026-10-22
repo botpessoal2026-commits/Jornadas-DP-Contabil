@@ -7,3 +7,6 @@ coverage/
 .vercel/
 test-results/
 playwright-report/
+
+work/
+supabase/.temp/

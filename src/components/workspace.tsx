@@ -69,8 +69,12 @@ import type {
   Shift,
   WeekPattern,
 } from "@/lib/types";
+import { contractMinutesFromHours } from "@/lib/contract";
 import { demoData } from "@/lib/demo";
 import LegalFields from "./legal-fields";
+import DayEditor from "./day-editor";
+import ScheduleAlerts from "./schedule-alerts";
+import { alertsForDate, buildAlertSummary } from "@/lib/alerts";
 import { exportCSV, exportExcel, exportPDF } from "@/lib/exports";
 
 type Page =
@@ -215,16 +219,22 @@ function Dialog({
   close: () => void;
 }) {
   const el = useRef<HTMLDivElement>(null);
+  const closeRef = useRef(close);
+  closeRef.current = close;
   useEffect(() => {
     const old = document.activeElement as HTMLElement;
-    el.current?.querySelector<HTMLElement>("input,select,button")?.focus();
+    const focusable = () =>
+      Array.from(
+        el.current?.querySelectorAll<HTMLElement>(
+          'button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),summary,[href],[tabindex="0"]',
+        ) ?? [],
+      ).filter((element) => element.getClientRects().length > 0);
+    focusable()[0]?.focus();
     const handle = (e: KeyboardEvent) => {
-      if (e.key === "Escape") close();
+      if (e.key === "Escape") closeRef.current();
       if (e.key === "Tab") {
-        const elements = el.current?.querySelectorAll<HTMLElement>(
-          "button,input,select,textarea,[href]",
-        );
-        if (!elements?.length) return;
+        const elements = focusable();
+        if (!elements.length) return;
         const first = elements[0],
           last = elements[elements.length - 1];
         if (e.shiftKey && document.activeElement === first) {
@@ -245,7 +255,7 @@ function Dialog({
       document.body.style.overflow = overflow;
       old?.focus();
     };
-  }, [close]);
+  }, []);
   return (
     <div
       className="overlay"
@@ -301,6 +311,12 @@ export default function Workspace() {
     [draft, setDraft] = useState<Schedule | null>(null),
     [restHoliday, setRestHoliday] = useState(true),
     [dirty, setDirty] = useState(false);
+  const [editedDay, setEditedDay] = useState<Day | null>(null);
+  const [activeDate, setActiveDate] = useState<string | null>(null);
+  const [saveState, setSaveState] = useState<
+    "idle" | "saving" | "saved" | "error"
+  >("idle");
+  const operationPending = useRef(false);
   const notify = (text: string, error = false) => setToast({ text, error });
   useEffect(() => {
     const leave = (e: BeforeUnloadEvent) => {
@@ -396,10 +412,61 @@ export default function Workspace() {
             company,
             schedule.mes,
             schedule.modelo_tipo,
+            data.employees.find((e) => e.id === schedule.funcionario_id),
           )
         : null,
-    [schedule, company, data.rules],
+    [schedule, company, data.rules, data.employees],
   );
+  const alertContext = {
+    companyId: company?.id ?? "",
+    companyName: company?.nome ?? "",
+    employeeId: schedule?.funcionario_id,
+    employeeName: schedule?.nome_funcionario ?? employee?.nome,
+    month,
+  };
+  const alertSummary = buildAlertSummary(report?.alerts ?? [], alertContext);
+  const editedReport = useMemo(
+    () =>
+      editedDay && schedule && company && modal?.kind === "dia"
+        ? evaluate(
+            schedule.dias.map((day) =>
+              day.data === editedDay.data ? editedDay : day,
+            ),
+            data.rules,
+            company,
+            schedule.mes,
+            schedule.modelo_tipo,
+            data.employees.find((e) => e.id === schedule.funcionario_id),
+          )
+        : null,
+    [editedDay, schedule, company, modal?.kind, data.rules, data.employees],
+  );
+  const editedSummary = buildAlertSummary(
+    editedReport?.alerts ?? [],
+    alertContext,
+  );
+  const previousOccurrences = new Set(
+    alertSummary.groups.flatMap((group) => group.occurrences.map((o) => o.id)),
+  );
+  const editedAlerts = editedDay
+    ? editedSummary.groups.filter(
+        (group) =>
+          group.action !== "rules" &&
+          group.action !== "employee" &&
+          (alertsForDate([group], editedDay.data).length > 0 ||
+            group.occurrences.some((o) => !previousOccurrences.has(o.id))),
+      )
+    : [];
+  const saveLabel =
+    saveState === "saving"
+      ? "Salvando"
+      : saveState === "error"
+        ? "Falha ao salvar"
+        : dirty || !saved
+          ? "Não salvo"
+          : demo
+            ? "Salvo na demonstração"
+            : "Salvo";
   const pendingRules = data.rules.filter((r) => !r.confirmado).length;
   const changeContext = (callback: () => void) => {
     if (
@@ -410,8 +477,12 @@ export default function Workspace() {
     callback();
     setDraft(null);
     setDirty(false);
+    setSaveState("idle");
+    setActiveDate(null);
   };
   async function perform(action: () => Promise<void>) {
+    if (operationPending.current) return;
+    operationPending.current = true;
     setBusy(true);
     try {
       await action();
@@ -423,6 +494,7 @@ export default function Workspace() {
         true,
       );
     } finally {
+      operationPending.current = false;
       setBusy(false);
     }
   }
@@ -526,7 +598,14 @@ export default function Workspace() {
   }
   async function saveCurrent() {
     if (!schedule) return;
-    await persistSchedules([schedule]);
+    setSaveState("saving");
+    try {
+      await persistSchedules([schedule]);
+      setSaveState("saved");
+    } catch (error) {
+      setSaveState("error");
+      throw error;
+    }
     setDraft(null);
     setDirty(false);
     notify(
@@ -625,7 +704,7 @@ export default function Workspace() {
   }
   async function formSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!modal) return;
+    if (!modal || (modal.kind === "dia" && !editedDay)) return;
     const fd = new FormData(event.currentTarget);
     const id = modal.row?.id as string | undefined;
     await perform(async () => {
@@ -659,6 +738,9 @@ export default function Workspace() {
             nome: pick(fd, "nome"),
             cargo: pick(fd, "cargo"),
             horario_contratual: pick(fd, "horario"),
+            carga_semanal_minutos: contractMinutesFromHours(
+              pick(fd, "carga_semanal"),
+            ),
             dias_descanso: fd.getAll("descanso").map(Number),
           },
           id,
@@ -766,17 +848,11 @@ export default function Workspace() {
         );
       }
       if (modal.kind === "dia" && schedule) {
-        const shifts = parseShifts(pick(fd, "intervalos"));
-        const changed = schedule.dias.map((d) =>
-          d.data === modal.row?.data
-            ? {
-                ...d,
-                intervalos: shifts,
-                folga: !shifts.length,
-                observacao: pick(fd, "observacao"),
-              }
-            : d,
+        if (!editedDay) return;
+        const changed = schedule.dias.map((day) =>
+          day.data === editedDay.data ? editedDay : day,
         );
+        setSaveState("idle");
         setDraft({ ...schedule, dias: changed });
         setDirty(true);
       }
@@ -790,8 +866,21 @@ export default function Workspace() {
       );
     });
   }
-  const edit = (kind: Modal["kind"], row?: object) =>
+  const edit = (kind: Modal["kind"], row?: object) => {
+    if (kind === "dia") {
+      setEditedDay(row as Day);
+      setActiveDate((row as Day).data);
+    }
     setModal({ kind, row: row as Record<string, unknown> });
+  };
+  const openAlertDay = (date: string) => {
+    const day = schedule?.dias.find((d) => d.data === date);
+    if (!day) return;
+    const cell = document.getElementById(`escala-dia-${date}`);
+    cell?.scrollIntoView({ block: "center", behavior: "smooth" });
+    cell?.focus({ preventScroll: true });
+    edit("dia", day);
+  };
   const navigate = (p: Page) => {
     setPage(p);
     setMobile(false);
@@ -970,6 +1059,7 @@ export default function Workspace() {
           <button
             key={id}
             className={`nav ${page === id ? "active" : ""}`}
+            aria-current={page === id ? "page" : undefined}
             onClick={() => navigate(id)}
           >
             <Icon size={17} />
@@ -982,6 +1072,7 @@ export default function Workspace() {
           <button
             key={id}
             className={`nav ${page === id ? "active" : ""}`}
+            aria-current={page === id ? "page" : undefined}
             onClick={() => navigate(id)}
           >
             <Icon size={17} />
@@ -1384,8 +1475,15 @@ export default function Workspace() {
                       >
                         <option value="">Selecione um modelo</option>
                         {models.map((m) => (
-                          <option key={m.id} value={m.id}>
+                          <option
+                            key={m.id}
+                            value={m.id}
+                            disabled={m.tipo === "6x1" && !company?.permite_6x1}
+                          >
                             {m.nome}
+                            {m.tipo === "6x1" && !company?.permite_6x1
+                              ? " — não autorizado pela empresa"
+                              : ""}
                           </option>
                         ))}
                       </select>
@@ -1414,7 +1512,13 @@ export default function Workspace() {
                     </label>
                     <button
                       className="button primary"
-                      disabled={busy || !employee || !model || !company}
+                      disabled={
+                        busy ||
+                        !employee ||
+                        !model ||
+                        !company ||
+                        (model.tipo === "6x1" && !company.permite_6x1)
+                      }
                       onClick={() =>
                         perform(async () => {
                           if (!employee || !model) return;
@@ -1428,6 +1532,7 @@ export default function Workspace() {
                           const s = createSchedule(employee, model, month);
                           setDraft(s);
                           setDirty(true);
+                          setSaveState("idle");
                           notify(
                             "Prévia gerada. Confira as semanas, os alertas e salve a escala.",
                           );
@@ -1489,9 +1594,9 @@ export default function Workspace() {
                       icon={SlidersHorizontal}
                     />
                     <Stat
-                      label="Alertas de conferência"
-                      value={report?.alerts.length ?? 0}
-                      note={`${report?.alerts.filter((a) => a.severity === "erro").length ?? 0} alertas de limite ou configuração`}
+                      label="Violações impeditivas"
+                      value={alertSummary.counts.violations}
+                      note={`${alertSummary.counts.attention} avisos · ${alertSummary.counts.pendingSources} fontes/regras pendentes`}
                       icon={ShieldCheck}
                     />
                   </div>
@@ -1508,7 +1613,7 @@ export default function Workspace() {
                     <div className="periods">
                       {report.periods.map((p) => (
                         <div className="period" key={p.start}>
-                          <span className="uppercase tracking-wide text-[9px]">
+                          <span className="period-dates">
                             {dateLabel(p.start)} — {dateLabel(p.end)}
                           </span>
                           <br />
@@ -1525,10 +1630,18 @@ export default function Workspace() {
                       ))}
                     </div>
                   )}
-                  <section className="panel">
+                  <ScheduleAlerts
+                    summary={alertSummary}
+                    onSelect={openAlertDay}
+                    onConfigure={() => navigate("regras")}
+                    onEmployeeReview={() =>
+                      employee && edit("funcionario", employee)
+                    }
+                  />
+                  <section className="panel" aria-label="Calendário da escala">
                     <div className="panel-head">
                       <div>
-                        <h2 className="capitalize">{monthLabel(month)}</h2>
+                        <h2>{monthLabel(month)}</h2>
                         <p className="subtitle !mt-1 !text-xs">
                           {schedule.nome_funcionario ?? employee?.nome}{" "}
                           <span className="mx-1">·</span> {schedule.modelo_nome}
@@ -1563,6 +1676,9 @@ export default function Workspace() {
                                   schedule,
                                   data.rules,
                                   company,
+                                  data.employees.find(
+                                    (e) => e.id === schedule.funcionario_id,
+                                  ),
                                 );
                             })
                           }
@@ -1573,18 +1689,30 @@ export default function Workspace() {
                         <button
                           className="button small"
                           disabled={busy}
-                          onClick={() => exportCSV(schedule, data.rules)}
+                          onClick={() =>
+                            exportCSV(
+                              schedule,
+                              data.rules,
+                              data.employees.find(
+                                (e) => e.id === schedule.funcionario_id,
+                              ),
+                            )
+                          }
                         >
                           <Download size={14} />
                           CSV
                         </button>
                         <button
                           className="button primary small"
-                          disabled={busy}
+                          disabled={busy || (!dirty && !!saved)}
                           onClick={() => perform(saveCurrent)}
                         >
                           <Check size={14} />
-                          {dirty ? "Salvar escala" : "Salvar novamente"}
+                          {saveState === "saving"
+                            ? "Salvando…"
+                            : dirty || !saved
+                              ? "Salvar escala"
+                              : "Escala salva"}
                         </button>
                       </div>
                     </div>
@@ -1614,65 +1742,97 @@ export default function Workspace() {
                       )}
                       {schedule.dias
                         .filter((d) => d.data.startsWith(month))
-                        .map((d) => (
-                          <button
-                            key={d.data}
-                            role="gridcell"
-                            className={`day ${computeDay(d, data.rules, schedule.dias).worked === 0 ? "rest" : ""}`}
-                            onClick={() => edit("dia", d)}
-                            aria-label={`${dateLabel(d.data)}: ${d.intervalos.length ? shiftText(d.intervalos) : computeDay(d, data.rules, schedule.dias).worked > 0 ? "Continuação do turno anterior" : "Folga"}. Editar.`}
-                          >
-                            <span className="day-number">
-                              {+d.data.slice(-2)}
-                              {report?.alerts.some(
-                                (a) =>
-                                  a.date === d.data && a.severity === "erro",
-                              ) && <span className="dot" />}
-                            </span>
-                            {d.intervalos.length ? (
-                              <>
-                                <span className="day-time">
-                                  {d.intervalos.map((s, i) => (
-                                    <span key={i} className="block">
-                                      {s.start} — {s.end}
-                                      {span(s)[1] >= 1440 ? " +1" : ""}
-                                    </span>
-                                  ))}
+                        .map((d) => {
+                          const dayAlerts = alertsForDate(
+                            alertSummary.groups,
+                            d.data,
+                          );
+                          const violations = dayAlerts.filter(
+                            (a) => a.category === "violation",
+                          );
+                          const attention = dayAlerts.filter(
+                            (a) => a.category === "attention",
+                          );
+                          const problem = violations.length
+                            ? "violation"
+                            : attention.length
+                              ? "attention"
+                              : "";
+                          return (
+                            <button
+                              key={d.data}
+                              id={`escala-dia-${d.data}`}
+                              data-date={d.data}
+                              data-problem={problem || undefined}
+                              aria-selected={activeDate === d.data}
+                              role="gridcell"
+                              className={`day ${computeDay(d, data.rules, schedule.dias).worked === 0 ? "rest" : ""} ${problem ? `has-${problem}` : ""} ${activeDate === d.data ? "selected" : ""}`}
+                              onClick={() => edit("dia", d)}
+                              aria-label={`${dateLabel(d.data)}${violations.length ? `, ${violations.length} violações impeditivas` : attention.length ? `, ${attention.length} avisos` : ""}: ${d.intervalos.length ? shiftText(d.intervalos) : computeDay(d, data.rules, schedule.dias).worked > 0 ? "Continuação do turno anterior" : "Folga"}. Editar.`}
+                            >
+                              <span className="day-number">
+                                <span className="desktop-day">
+                                  {+d.data.slice(-2)}
                                 </span>
-                                <span className="day-hours">
-                                  {formatMinutes(
-                                    computeDay(d, data.rules, schedule.dias)
-                                      .computed,
-                                  )}
+                                <span className="mobile-date">
+                                  {dateLabel(d.data)}
                                 </span>
-                              </>
-                            ) : (
-                              <span className="rest-label">
-                                {computeDay(d, data.rules, schedule.dias)
-                                  .worked > 0 ? (
-                                  <>
-                                    Continuação
-                                    <br />
+                                {problem && (
+                                  <AlertTriangle size={16} aria-hidden="true" />
+                                )}
+                              </span>
+                              {d.intervalos.length ? (
+                                <>
+                                  <span className="day-time">
+                                    {d.intervalos.map((s, i) => (
+                                      <span key={i} className="block">
+                                        {s.start} — {s.end}
+                                        {span(s)[1] >= 1440 ? " +1" : ""}
+                                      </span>
+                                    ))}
+                                  </span>
+                                  <span className="day-hours">
                                     {formatMinutes(
                                       computeDay(d, data.rules, schedule.dias)
                                         .computed,
                                     )}
-                                  </>
-                                ) : (
-                                  "Folga"
-                                )}
-                              </span>
-                            )}
-                            {d.feriado && (
-                              <span className="holiday">{d.feriado}</span>
-                            )}
-                            {d.observacao && (
-                              <span className="holiday text-[#52765b]">
-                                Com observação
-                              </span>
-                            )}
-                          </button>
-                        ))}
+                                  </span>
+                                </>
+                              ) : (
+                                <span className="rest-label">
+                                  {computeDay(d, data.rules, schedule.dias)
+                                    .worked > 0 ? (
+                                    <>
+                                      Continuação
+                                      <br />
+                                      {formatMinutes(
+                                        computeDay(d, data.rules, schedule.dias)
+                                          .computed,
+                                      )}
+                                    </>
+                                  ) : (
+                                    "Folga"
+                                  )}
+                                </span>
+                              )}
+                              {problem && (
+                                <span className={`day-problem ${problem}`}>
+                                  {violations.length
+                                    ? `${violations.length} impedimento(s)`
+                                    : `${attention.length} aviso(s)`}
+                                </span>
+                              )}
+                              {d.feriado && (
+                                <span className="holiday">{d.feriado}</span>
+                              )}
+                              {d.observacao && (
+                                <span className="holiday text-[#52765b]">
+                                  Com observação
+                                </span>
+                              )}
+                            </button>
+                          );
+                        })}
                     </div>
                     <div className="legend">
                       <span>
@@ -1684,11 +1844,16 @@ export default function Workspace() {
                         Folga
                       </span>
                       <span>
-                        <span className="dot mr-1" />
-                        Alerta para conferir
+                        <AlertTriangle size={15} aria-hidden="true" />
+                        Borda vermelha: impedimento · âmbar: atenção
                       </span>
-                      <span className="ml-auto">
-                        {dirty ? "Prévia não salva" : "Escala salva"}
+                      <span
+                        className="ml-auto save-status"
+                        role="status"
+                        aria-live="polite"
+                      >
+                        {saveLabel}
+                        {dirty ? " · alterações locais" : ""}
                       </span>
                     </div>
                   </section>
@@ -1709,10 +1874,41 @@ export default function Workspace() {
                           </thead>
                           <tbody>
                             {report?.weeks.map((w) => (
-                              <tr key={w.start}>
+                              <tr
+                                key={w.start}
+                                className={
+                                  alertSummary.violations.some((group) =>
+                                    group.periods.some(
+                                      (p) =>
+                                        p.start <= w.end && p.end >= w.start,
+                                    ),
+                                  )
+                                    ? "week-conflict"
+                                    : ""
+                                }
+                              >
                                 <td>
-                                  {dateLabel(w.start).slice(0, 5)} a{" "}
-                                  {dateLabel(w.end).slice(0, 5)}
+                                  <button
+                                    className="week-link"
+                                    onClick={() =>
+                                      openAlertDay(
+                                        w.start < `${month}-01`
+                                          ? `${month}-01`
+                                          : w.start,
+                                      )
+                                    }
+                                  >
+                                    {dateLabel(w.start).slice(0, 5)} a{" "}
+                                    {dateLabel(w.end).slice(0, 5)}
+                                    {alertSummary.violations.some((group) =>
+                                      group.periods.some(
+                                        (p) =>
+                                          p.start <= w.end && p.end >= w.start,
+                                      ),
+                                    )
+                                      ? " · conflito"
+                                      : ""}
+                                  </button>
                                 </td>
                                 <td>
                                   <span
@@ -1797,37 +1993,6 @@ export default function Workspace() {
                       </div>
                     </section>
                   </div>
-                  <section className="panel">
-                    <div className="panel-head">
-                      <h2>Alertas e fontes</h2>
-                      <span className="pill warn">
-                        {report?.alerts.length ?? 0} PARA CONFERIR
-                      </span>
-                    </div>
-                    <div className="alert-list">
-                      {report?.alerts.length ? (
-                        report.alerts.map((a, i) => (
-                          <div
-                            className={`alert-row ${a.severity === "erro" ? "error" : ""}`}
-                            key={i}
-                          >
-                            <AlertTriangle size={16} />
-                            <div>
-                              <strong>{dateLabel(a.date)}</strong> · {a.message}
-                              <div className="alert-source">
-                                {a.rule} · {a.source}
-                              </div>
-                            </div>
-                          </div>
-                        ))
-                      ) : (
-                        <div className="panel-body muted text-xs">
-                          Sem alertas nos parâmetros cadastrados. Isso não
-                          substitui a conferência da CCT.
-                        </div>
-                      )}
-                    </div>
-                  </section>
                 </>
               )}
             </>
@@ -1968,7 +2133,15 @@ export default function Workspace() {
                                 )?.nome
                               }
                             </td>
-                            <td>{e.horario_contratual || "Não informado"}</td>
+                            <td>
+                              {e.carga_semanal_minutos
+                                ? `${formatMinutes(e.carga_semanal_minutos)} / semana`
+                                : "Carga pendente de revisão"}
+                              <small className="muted">
+                                {e.horario_contratual ||
+                                  "Sem observações contratuais"}
+                              </small>
+                            </td>
                             <td>
                               {e.dias_descanso
                                 .map((d) => dayNames[d].slice(0, 3))
@@ -2512,7 +2685,26 @@ export default function Workspace() {
                       defaultValue={String(modal.row?.cargo ?? "")}
                     />
                   </Field>
-                  <Field label="Horário contratual">
+                  <Field label="Carga semanal contratual (horas)">
+                    <input
+                      name="carga_semanal"
+                      type="number"
+                      min={1 / 60}
+                      max="168"
+                      step="any"
+                      placeholder="Ex.: 30 ou 30,5"
+                      defaultValue={
+                        typeof modal.row?.carga_semanal_minutos === "number"
+                          ? modal.row.carga_semanal_minutos / 60
+                          : ""
+                      }
+                    />
+                    <small className="muted">
+                      Deixe vazio se depender de revisão. 30,5 horas = 30h30.
+                      Não autoriza exceções legais.
+                    </small>
+                  </Field>
+                  <Field label="Horário contratual / observações">
                     <input
                       name="horario"
                       placeholder="Ex.: 42h semanais, seg a sex"
@@ -2729,29 +2921,75 @@ export default function Workspace() {
                   <p className="span2 muted">
                     {dateLabel(String(modal.row?.data))} · {employee?.nome}
                   </p>
-                  <div className="span2">
-                    <Field label="Intervalos de trabalho (vazio = folga)">
-                      <input
-                        name="intervalos"
-                        placeholder="08:00-12:00, 13:00-17:24"
-                        defaultValue={shiftText(
-                          (modal.row?.intervalos ?? []) as Shift[],
-                        )}
-                      />
-                    </Field>
-                  </div>
-                  <div className="span2">
-                    <Field label="Observação">
-                      <textarea
-                        name="observacao"
-                        defaultValue={String(modal.row?.observacao ?? "")}
-                      />
-                    </Field>
-                  </div>
-                  <p className="warning-text span2">
-                    Use +1 para término no dia seguinte. Confira os alertas após
-                    ajustar o dia e salve a escala.
-                  </p>
+                  <DayEditor
+                    key={String(modal.row?.data)}
+                    day={modal.row as unknown as Day}
+                    onChange={setEditedDay}
+                  />
+                  {editedDay && editedReport && (
+                    <section
+                      className="span2 editor-conference"
+                      aria-label="Conferência da edição"
+                      aria-live="polite"
+                    >
+                      <h3>Impacto na escala</h3>
+                      {editedReport.weeks
+                        .filter(
+                          (w) =>
+                            w.start <= addDays(editedDay.data, 1) &&
+                            w.end >= editedDay.data,
+                        )
+                        .map((w) => (
+                          <p key={w.start}>
+                            Semana de {dateLabel(w.start)}:{" "}
+                            <strong>{formatMinutes(w.total)}</strong>
+                            {report?.weeks.find(
+                              (original) => original.start === w.start,
+                            ) &&
+                              ` (antes: ${formatMinutes(report.weeks.find((original) => original.start === w.start)!.total)})`}
+                          </p>
+                        ))}
+                      {editedAlerts.map((group) => (
+                        <p
+                          key={group.id}
+                          className={
+                            group.category === "violation"
+                              ? "inline-violation"
+                              : "warning-text"
+                          }
+                        >
+                          <strong>
+                            {group.category === "violation"
+                              ? "Impedimento"
+                              : "Atenção"}
+                            :
+                          </strong>{" "}
+                          {(() => {
+                            const occurrence =
+                              group.occurrences.find(
+                                (o) => o.date === editedDay.data,
+                              ) ??
+                              group.occurrences.find(
+                                (o) =>
+                                  o.period &&
+                                  o.period.start <= editedDay.data &&
+                                  o.period.end >= editedDay.data,
+                              ) ??
+                              group.occurrences.find(
+                                (o) => !previousOccurrences.has(o.id),
+                              ) ??
+                              group.occurrences[0];
+                            return `${dateLabel(occurrence.date)} · ${occurrence.message}`;
+                          })()}
+                        </p>
+                      ))}
+                      <p className="muted">
+                        Fontes pendentes são conferidas separadamente. Horários
+                        válidos podem ser salvos na prévia mesmo com alertas;
+                        isso não aprova a escala.
+                      </p>
+                    </section>
+                  )}
                 </>
               )}
             </div>
@@ -2763,7 +3001,10 @@ export default function Workspace() {
               >
                 Cancelar
               </button>
-              <button className="button primary" disabled={busy}>
+              <button
+                className="button primary"
+                disabled={busy || (modal.kind === "dia" && !editedDay)}
+              >
                 {busy ? (
                   <LoaderCircle size={15} className="animate-spin" />
                 ) : (

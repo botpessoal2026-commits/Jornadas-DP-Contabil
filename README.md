@@ -8,7 +8,7 @@ Aplicação em português para o Departamento Pessoal organizar empresas, funcio
 - Demonstração usa dados fictícios em memória e nunca acessa dados reais.
 - Sem variáveis do Supabase, login e gravação remota ficam indisponíveis; não existe fallback silencioso de dados reais para armazenamento local.
 - Criação do projeto Supabase, aplicação da migration no serviço e publicação Vercel dependem do acesso às respectivas contas. Nenhum projeto pago é criado pelo código.
-- Não foi validada a existência/conteúdo da EC nº 141/2026 descrita no pedido. As fases de 42h/40h são propostas editáveis, pendentes de conferência, não afirmações legais.
+- Não foi validada a existência/conteúdo da EC nº 141/2026 descrita no pedido (consulta oficial sem resposta nesta execução). As hipóteses de 42h/40h são exclusivas da demonstração e dos testes; não são importadas para o banco real. Regras já cadastradas não foram alteradas.
 
 ## Executar
 
@@ -90,7 +90,7 @@ Os descansos do cadastro do funcionário são contratuais. O modelo escolhido de
 `src/lib/engine.ts` recebe os parâmetros do banco; não importa valores legais dos cadastros iniciais. `src/lib/presets.ts` contém apenas sugestões editáveis para primeiro cadastro e exemplos da demonstração. Grupos: regime, intervalo, interjornada, noturno e divisor. A regra de cada grupo com vigência mais recente, não posterior à data analisada, é usada. Regras não conferidas participam da simulação e sempre geram aviso com fonte; a aplicação não as certifica.
 
 - **42h e divisor 210:** seg–sex, 08:00–12:00 e 13:00–17:24 somam 2520 minutos; o divisor usa o fator cadastrado. O total real do calendário e o divisor são apresentados separadamente.
-- **Dezembro/2026:** a referência inicial sugere 44h até 14/12 e 42h a partir de 15/12. A data pode ser alterada para 16/12 ou outra data após conferência.
+- **Dezembro/2026:** somente a demonstração usa uma hipótese de corte entre 44h e 42h. Essas datas são fixtures de simulação, sem confirmação jurídica; a importação real não inclui essas fases.
 - **40h:** 01/12/2027 é uma data estimada de cadastro, explicitamente não confirmada. O parâmetro `permite_limite_empresa=false` impede que o limite diário da empresa amplie o teto desta fase.
 - **Transição semanal:** semana civil segunda–domingo; aplica-se preventivamente o menor teto da semana, com alerta que explica a política. Não se afirma que esta seja a regra jurídica de proporcionalização. Confira a CCT/ato oficial.
 - **Limites diários:** considera tanto o trabalho por data civil quanto a jornada iniciada na data, evitando que atravessar meia-noite esconda uma jornada longa.
@@ -129,3 +129,30 @@ Esses testes não substituem a validação de Auth, SMTP, migrations e deploy no
 - Banco de horas, prazos e instrumentos de compensação.
 
 A aplicação oferece planejamento e alertas, não parecer jurídico nem cálculo completo de folha.
+
+
+## Entrega parcial P0: carga contratual estruturada
+
+O cadastro do funcionário possui carga semanal explícita em horas decimais (30,5 = 30h30), persistida em `funcionarios.carga_semanal_minutos`. O texto contratual continua preservado. Cadastros antigos permanecem com carga nula até revisão; não há backfill automático. A faixa técnica de 1 a 10080 minutos não representa autorização legal de jornada.
+
+A conferência compara a semana completa, incluindo dias adjacentes e horas noturnas reduzidas parametrizadas, com o contrato do funcionário. Excesso gera erro com pessoa, semana, total e orientação de revisão. Ausência de carga gera aviso. PDF e XLSX recebem os mesmos alertas contratuais; CSV e XLSX incluem a carga estruturada. O contrato atual é usado na conferência: ainda não existe histórico de vigência contratual ou snapshot por revisão.
+
+Antes de executar a aplicação atualizada contra um ambiente Supabase de teste, aplique também `supabase/migrations/20261022172216_structured_contract.sql` nesse ambiente, após a migration original. Em instalações existentes, aplique somente a nova migration pendente, preservando o histórico. Ela adiciona uma coluna nullable com CHECK e reutiliza RLS e auditoria existentes. A migration não foi aplicada a banco remoto nesta entrega. A interface nova depende dessa coluna para salvar funcionários.
+
+Validação local: 31 testes unitários/de banco PGlite, 4 testes Playwright (incluindo 375px e 390px), typecheck, verificação de formatação e build. Não há script de lint configurado. O teste de banco cria um cadastro legado antes da nova migration, verifica preservação, gravação/leitura, restrições e isolamento de duas contas. Playwright usa demonstração em memória, sem simular persistência remota.
+
+Pendente: fluxo rascunho → conferência → aprovação → publicação com validação no servidor, papéis de aprovador, revisão imutável de publicadas, escopo jurídico por categoria/CCT e atualização legal oficialmente confirmada; depois dashboard, calendários Dia/Semana, lote e modelos avançados. O editor de campos separados foi concluído na atualização abaixo. Esta entrega não implementa aprovação e não declara conformidade legal.
+
+## Atualização P0: alertas acionáveis, calendário e editor
+
+A conferência agora separa violações, atenção e fontes/regras pendentes. Os contadores mostram **grupos distintos** e **ocorrências** separadamente; pendências de parametrização não inflam o contador de violações. Ocorrências idênticas são agrupadas sem esconder datas, períodos, limites ou fontes diferentes. Os IDs são determinísticos por contexto de empresa/funcionário/regra, sem alterar o formato persistido das escalas. Fontes ficam recolhidas inicialmente e abrem os parâmetros; revisão contratual abre o cadastro; alertas de dia/período abrem o dia correspondente.
+
+Células e semanas conflitantes têm borda, fundo, ícone e texto. A seleção acompanha o alerta acionado. No celular, a competência aparece em cartões de dias com horários completos. Os seletores identificam modelos 6×1 não autorizados pela configuração da empresa antes da geração; a cópia de uma escala irregular existente continua permitida como prévia com alertas.
+
+O editor usa Entrada, Início do intervalo, Retorno e Saída, com indicação explícita da data de cada horário (dia inicial ou seguinte). Há edição avançada para preservar jornadas com mais de dois períodos. Formato inválido e horários sobrepostos preservam a entrada, mostram erro inline acessível e bloqueiam o envio do formulário. Horários estruturalmente válidos, mesmo com alertas legais, podem ser salvos na prévia e depois pela gravação existente. O impacto semanal e novos conflitos no dia seguinte aparecem antes de aplicar a edição.
+
+O modal mantém foco durante a digitação, limita Tab/Shift+Tab aos controles visíveis e devolve o foco ao fechar. A navegação indica `aria-current`. Foram testados contraste mínimo 4,5:1 nos novos textos de alertas/células, foco visível e telas de 375/390px; isso não representa auditoria WCAG de toda a aplicação. O salvamento diferencia alterações locais, salvando, salvo e falha, preserva a prévia em caso de erro e evita solicitações simultâneas. A demonstração informa que o salvamento é apenas na sessão.
+
+Validação desta atualização: **50 testes unitários/de banco local e 10 testes Playwright aprovados** (a suíte de nove testes e o novo teste de contraste foram executados separadamente). Typecheck, formatação, build e `git diff --check` aprovados; não há lint configurado. Testes de navegador usam a demonstração; Supabase Auth e persistência remota continuam sem verificação com contas de teste. Nenhuma migration nova foi necessária nesta atualização; a migration contratual da primeira entrega continua necessária antes de usar o cadastro atualizado no Supabase.
+
+As duas variantes da URL oficial da EC141 expiraram novamente sem conteúdo documental. Nenhuma data foi promovida a parâmetro legal confirmado. Permanecem pendentes o fluxo persistido de aprovação/publicação com validação e permissões no servidor, versionamento de publicadas, modelo padrão/vigência contratual, regras por categoria/CCT e os demais itens P1. O editor mantém somente os tipos trabalho/folga suportados no schema atual. Os alertas não constituem aprovação jurídica, e os IDs de contexto não substituem o histórico de decisões a implementar.
