@@ -1,5 +1,6 @@
 import type { Table } from "jspdf-autotable";
 import type { Company, Employee, Schedule } from "./types";
+import { formatCpf } from "./cpf";
 import {
   buildTimesheet,
   type TimesheetData,
@@ -117,6 +118,7 @@ export async function timesheetDocument(
     `CNPJ: ${cnpjLabel(company.cnpj)}${location ? ` | Localidade: ${location}` : ""}`,
     ...(company.endereco ? [`Endereço: ${company.endereco}`] : []),
     `Funcionário: ${employee.matricula ? `${employee.matricula} - ` : ""}${employee.nome}`,
+    `CPF: ${formatCpf(employee.cpf)}`,
     `Cargo: ${employee.cargo || "Não informado"}${employee.setor ? ` | Setor: ${employee.setor}` : ""}`,
     `Admissão: ${employee.admissao ? dateLabel(employee.admissao) : "Não informada"} | Base: ${data.preview ? "prévia não salva" : "escala do calendário"}`,
     `Horário de trabalho: ${workHoursLabel(data)}`,
@@ -126,13 +128,13 @@ export async function timesheetDocument(
   const identificationLines = identification.flatMap(
     (line) => doc.splitTextToSize(line, width) as string[],
   );
-  const notice =
-    "Horário de trabalho no cabeçalho é referência. Preencha as marcações efetivamente realizadas nos campos em branco." +
-    (data.rows.some((row) => row.planned.length > 2)
-      ? " Registre períodos adicionais nas observações; eles não são classificados automaticamente como extras."
-      : "");
+  const notice = data.rows.some((row) => row.planned.length > 2)
+    ? "Registre períodos adicionais nas observações; eles não são classificados automaticamente como extras."
+    : "";
   doc.setFontSize(7);
-  const noticeLines = doc.splitTextToSize(notice, width) as string[];
+  const noticeLines = notice
+    ? (doc.splitTextToSize(notice, width) as string[])
+    : [];
   const tableStart =
     22 + identificationLines.length * 3.6 + noticeLines.length * 3.2 + 3;
   const drawHeader = () => {
@@ -152,11 +154,13 @@ export async function timesheetDocument(
     doc.setLineWidth(0.25);
     doc.line(margin, 17, margin + width, 17);
     doc.text(identificationLines, margin, 22, { lineHeightFactor: 1.275 });
-    doc.setFontSize(7);
-    doc.setTextColor(58, 70, 82);
-    doc.text(noticeLines, margin, 22 + identificationLines.length * 3.6 + 1, {
-      lineHeightFactor: 1.1,
-    });
+    if (noticeLines.length) {
+      doc.setFontSize(7);
+      doc.setTextColor(58, 70, 82);
+      doc.text(noticeLines, margin, 22 + identificationLines.length * 3.6 + 1, {
+        lineHeightFactor: 1.1,
+      });
+    }
   };
   const body = data.rows.map((row) => [
     row.day,
@@ -253,7 +257,7 @@ export async function timesheetDocument(
 
   const table = (doc as typeof doc & { lastAutoTable: Table }).lastAutoTable;
   let signatureY = (table.finalY ?? tableStart) + 13;
-  if (signatureY + 16 > 285) {
+  if (signatureY + 4 > 285) {
     doc.addPage();
     drawHeader();
     signatureY = tableStart + 18;
@@ -268,15 +272,6 @@ export async function timesheetDocument(
   doc.text("Assinatura do funcionário", center, signatureY + 4, {
     align: "center",
   });
-  doc.setFontSize(6.8);
-  doc.text(
-    doc.splitTextToSize(
-      "Linhas escuras e riscadas: folga ou feriado sem trabalho previsto. Feriado com trabalho: destaque e marcações disponíveis.",
-      width,
-    ),
-    10,
-    signatureY + 11,
-  );
   const pages = doc.getNumberOfPages();
   for (let page = 1; page <= pages; page++) {
     doc.setPage(page);

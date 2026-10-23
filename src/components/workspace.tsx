@@ -72,6 +72,7 @@ import type {
   WeekPattern,
 } from "@/lib/types";
 import { contractMinutesFromHours } from "@/lib/contract";
+import { normalizeCpf } from "@/lib/cpf";
 import { demoData } from "@/lib/demo";
 import LegalFields from "./legal-fields";
 import CompanyDirectory from "./company-directory";
@@ -946,6 +947,7 @@ export default function Workspace() {
         );
       }
       if (modal.kind === "funcionario") {
+        const cpf = normalizeCpf(pick(fd, "cpf"));
         const dailyContract = contractMinutesFromHours(
           pick(fd, "carga_diaria"),
         );
@@ -956,6 +958,7 @@ export default function Workspace() {
           {
             empresa_id: pick(fd, "empresa_id"),
             nome: pick(fd, "nome"),
+            ...(cpf !== null || modal.row?.cpf != null ? { cpf } : {}),
             cargo: pick(fd, "cargo"),
             matricula: pick(fd, "matricula"),
             setor: pick(fd, "setor"),
@@ -1824,7 +1827,7 @@ export default function Workspace() {
                       [
                         "2",
                         "Adicione os funcionários",
-                        "Nome, cargo e horário contratual. Sem CPF.",
+                        "Nome, CPF opcional, cargo e horário contratual.",
                         "funcionarios",
                       ],
                       [

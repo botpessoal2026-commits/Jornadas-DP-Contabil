@@ -1,6 +1,7 @@
 "use client";
 import { useId, useState } from "react";
 import type { Company, Employee, Model } from "@/lib/types";
+import { formatCpf } from "@/lib/cpf";
 
 type CompanyDefaults = Company & {
   situacao?: "ativa" | "inativa" | "arquivada";
@@ -118,6 +119,24 @@ export default function EmployeeFields({
           required
           maxLength={160}
           defaultValue={employee?.nome ?? ""}
+          autoComplete="off"
+        />
+      </label>
+      <label htmlFor={`${id}-cpf`}>
+        CPF (opcional)
+        <input
+          id={`${id}-cpf`}
+          name="cpf"
+          inputMode="numeric"
+          maxLength={14}
+          pattern="[0-9]{11}|[0-9]{3}[.][0-9]{3}[.][0-9]{3}-[0-9]{2}"
+          title="Informe 11 dígitos ou use o formato 000.000.000-00."
+          placeholder="000.000.000-00"
+          defaultValue={
+            employee?.cpf?.replace(/\D/g, "").length === 11
+              ? formatCpf(employee.cpf)
+              : (employee?.cpf ?? "")
+          }
           autoComplete="off"
         />
       </label>
