@@ -86,7 +86,12 @@ import { scopeCompanyData, resolveEmployeeModel } from "@/lib/company-context";
 import DayEditor from "./day-editor";
 import ScheduleAlerts from "./schedule-alerts";
 import { alertsForDate, buildAlertSummary } from "@/lib/alerts";
-import { exportCSV, exportExcel, exportPDF } from "@/lib/exports";
+import {
+  exportCSV,
+  exportExcel,
+  exportPDF,
+  exportTimesheetPDF,
+} from "@/lib/exports";
 import Brand from "./brand";
 import TeamSchedule from "./team-schedule";
 
@@ -2200,6 +2205,25 @@ export default function Workspace() {
                             >
                               <FileText size={14} />
                               PDF
+                            </button>
+                            <button
+                              className="button small"
+                              title="Gerar folha de ponto em PDF conforme o calendário atual"
+                              disabled={busy || !company || !employee}
+                              onClick={() =>
+                                perform(async () => {
+                                  if (company && employee)
+                                    await exportTimesheetPDF(
+                                      schedule,
+                                      company,
+                                      employee,
+                                      { preview: dirty || !saved },
+                                    );
+                                })
+                              }
+                            >
+                              <FileText size={14} />
+                              Folha de ponto
                             </button>
                             <button
                               className="button small"

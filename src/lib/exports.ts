@@ -234,3 +234,23 @@ export async function exportPDF(
     `escala-${s.mes.slice(0, 7)}.pdf`,
   );
 }
+
+export async function exportTimesheetPDF(
+  schedule: Schedule,
+  company: Company,
+  employee: Employee,
+  options: import("./timesheet").TimesheetOptions = {},
+) {
+  const { timesheetDocument } = await import("./timesheet-pdf");
+  const employeeName =
+    employee.nome
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-|-$/g, "")
+      .slice(0, 60) || "funcionario";
+  (await timesheetDocument(schedule, company, employee, options)).save(
+    `folha-de-ponto-${schedule.mes.slice(0, 7)}-${employeeName}.pdf`,
+  );
+}
