@@ -69,7 +69,7 @@ export async function excelBuffer(
 ) {
   const { default: ExcelJS } = await import("exceljs");
   const book = new ExcelJS.Workbook();
-  book.creator = "Gerador de Jornadas";
+  book.creator = "Cont Contábil · Gerador de Jornadas";
   const sheet = book.addWorksheet("Escala");
   const rows = exportRows(s, rules, employee);
   sheet.columns = Object.keys(rows[0] ?? {}).map((key) => ({
@@ -166,7 +166,7 @@ export async function pdfDocument(
       r.Feriado,
     ]),
     styles: { fontSize: 8 },
-    headStyles: { fillColor: [25, 95, 72] },
+    headStyles: { fillColor: [10, 57, 116] },
   });
   doc.addPage();
   doc.text(

@@ -1,9 +1,9 @@
 import type { Metadata } from "next";
 import "./globals.css";
 export const metadata: Metadata = {
-  title: "Gerador de Jornadas | Departamento Pessoal",
+  title: "Cont Contábil | Gerador de Jornadas",
   description:
-    "Organize empresas, funcionários e escalas mensais com parâmetros legais editáveis.",
+    "Planeje empresas, funcionários e jornadas de trabalho com o Gerador de Jornadas da Cont Contábil.",
 };
 export default function Layout({ children }: { children: React.ReactNode }) {
   return (

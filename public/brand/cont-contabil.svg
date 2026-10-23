@@ -1,0 +1,67 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1380" height="640" viewBox="100 120 1380 640">
+      <title>Cont Contabil — Identidade visual</title>
+      <desc>Logomarca vetorial com asas prateadas, laços azuis e nome CONT CONTABIL.</desc>
+      <defs>
+    <linearGradient id="wingMetal" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#91ADC1"/><stop offset="0.48" stop-color="#C1CED8"/><stop offset="1" stop-color="#6287A3"/>
+    </linearGradient>
+    <linearGradient id="ballMetal" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#FFFFFF"/><stop offset="0.45" stop-color="#B9D0DF"/><stop offset="1" stop-color="#6488A6"/>
+    </linearGradient>
+    <linearGradient id="shaftMetal" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#7793AA"/><stop offset="0.40" stop-color="#EAF4FC"/><stop offset="1" stop-color="#8AA9C1"/>
+    </linearGradient>
+    <linearGradient id="ribbonSilver" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#FAFDFF"/><stop offset="0.48" stop-color="#A8C0D2"/><stop offset="1" stop-color="#7898B2"/>
+    </linearGradient>
+    <linearGradient id="ribbonBlue" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0E66BC"/><stop offset="0.42" stop-color="#03A2E6"/><stop offset="0.72" stop-color="#52D3FF"/><stop offset="1" stop-color="#056BAE"/>
+    </linearGradient>
+    
+    <linearGradient id="line" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#18C0F2"/><stop offset="1" stop-color="#067BBC"/>
+    </linearGradient>
+    </defs>
+        <g transform="translate(48 38) scale(1.75)">
+  <g>
+    <!-- sweep wings: four separate feather forms, symmetry around staff -->
+    <g fill="url(#wingMetal)" stroke="#758FA8" stroke-width="1.25" stroke-linejoin="round">
+      <path d="M 203 101 C 173 80 146 66 112 72 C 86 77 63 83 40 78 C 53 92 79 94 111 85 C 143 78 174 94 195 110 Z"/>
+      <path d="M 189 113 C 161 90 139 84 115 92 C 94 100 77 104 58 99 C 73 115 96 115 121 103 C 141 95 157 102 179 124 Z"/>
+      <path d="M 175 123 C 149 105 132 104 116 115 C 100 125 91 128 76 126 C 90 139 110 135 126 121 C 140 113 157 119 168 133 Z"/>
+      <path d="M 160 134 C 144 121 128 124 118 135 C 111 140 105 141 99 139 C 112 151 132 145 146 133 L 155 140 Z"/>
+    </g>
+    <g transform="translate(420 0) scale(-1 1)" fill="url(#wingMetal)" stroke="#758FA8" stroke-width="1.25" stroke-linejoin="round">
+      <path d="M 203 101 C 173 80 146 66 112 72 C 86 77 63 83 40 78 C 53 92 79 94 111 85 C 143 78 174 94 195 110 Z"/>
+      <path d="M 189 113 C 161 90 139 84 115 92 C 94 100 77 104 58 99 C 73 115 96 115 121 103 C 141 95 157 102 179 124 Z"/>
+      <path d="M 175 123 C 149 105 132 104 116 115 C 100 125 91 128 76 126 C 90 139 110 135 126 121 C 140 113 157 119 168 133 Z"/>
+      <path d="M 160 134 C 144 121 128 124 118 135 C 111 140 105 141 99 139 C 112 151 132 145 146 133 L 155 140 Z"/>
+    </g>
+    <!-- fine lines in the feathers -->
+    <g fill="none" stroke="#758FA8" opacity="0.7" stroke-width="1.8" stroke-linecap="round">
+      <path d="M 77 84 C 121 72 160 78 192 105"/>
+      <path d="M 95 107 C 132 88 158 99 174 117"/>
+      <path d="M 100 128 C 122 109 145 113 163 127"/>
+      <path d="M 343 84 C 299 72 260 78 228 105"/>
+      <path d="M 325 107 C 288 88 262 99 246 117"/>
+      <path d="M 320 128 C 298 109 275 113 257 127"/>
+    </g>
+    <!-- ball of the staff -->
+    <circle cx="210" cy="75" r="17" fill="url(#ballMetal)" stroke="#758FA8" stroke-width="2.3"/>
+    <path d="M 203 92 L 203 300 Q 210 312 217 300 L 217 92 Z" fill="url(#shaftMetal)" stroke="#758FA8" stroke-width="1.5"/>
+    <!-- two intertwining ribbons -->
+    <path d="M 195 115 C 151 139 125 170 136 204 C 145 233 187 251 213 277 C 239 301 225 326 210 344 C 199 358 197 372 205 388" fill="none" stroke="#758FA8" stroke-width="22" stroke-linecap="round" stroke-linejoin="round" opacity="0.94"/>
+    <path d="M 195 115 C 151 139 125 170 136 204 C 145 233 187 251 213 277 C 239 301 225 326 210 344 C 199 358 197 372 205 388" fill="none" stroke="url(#ribbonSilver)" stroke-width="17.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M 225 115 C 269 139 295 170 284 204 C 275 233 233 251 207 277 C 181 301 195 326 210 344 C 221 358 223 372 215 388" fill="none" stroke="#758FA8" stroke-width="22" stroke-linecap="round" stroke-linejoin="round" opacity="0.9"/>
+    <path d="M 225 115 C 269 139 295 170 284 204 C 275 233 233 251 207 277 C 181 301 195 326 210 344 C 221 358 223 372 215 388" fill="none" stroke="url(#ribbonBlue)" stroke-width="17.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <!-- central crossing accent in blue, retaining intertwined shape -->
+    <path d="M 243 133 C 253 154 254 177 241 196 C 226 219 202 240 185 254 L 204 273 C 226 255 254 229 266 209 C 282 181 271 150 243 133 Z" fill="url(#ribbonBlue)" stroke="#758FA8" stroke-width="1.8"/>
+    <path d="M 250 147 C 262 175 259 190 246 208" fill="none" stroke="#B8F4FF" stroke-width="3" opacity="0.55" stroke-linecap="round"/>
+  </g>
+  </g>
+        <g fill="#0A315B" transform="translate(765.000 391.000) scale(0.103516 -0.103516)"><path d="M771 -24C1120 -24 1380 191 1427 523H1117C1079 348 951 248 775 248C521 248 373 441 373 744C373 1049 522 1242 775 1242C952 1242 1081 1141 1116 965H1427C1380 1298 1120 1514 771 1514C361 1514 63 1220 63 744C63 271 362 -24 771 -24Z" transform="translate(0.000 0)"/><path d="M765 -24C1166 -24 1468 270 1468 744C1468 1219 1166 1514 765 1514C364 1514 63 1219 63 744C63 272 364 -24 765 -24ZM765 248C535 248 373 428 373 744C373 1062 535 1242 765 1242C995 1242 1158 1062 1158 744C1158 428 995 248 765 248Z" transform="translate(1554.623 0)"/><path d="M111 0H419V691C419 755 418 882 412 1038C496 887 572 758 615 690L1049 0H1374V1490H1067V753C1067 690 1068 567 1072 452C1013 559 949 672 914 728L435 1490H111Z" transform="translate(3153.245 0)"/><path d="M45 1226H497V0H805V1226H1256V1490H45Z" transform="translate(4705.868 0)"/></g>
+        <g fill="#007DBF" transform="translate(775.000 555.000) scale(0.059570 -0.059570)"><path d="M776 -24C1101 -24 1353 177 1404 494H1179C1132 292 980 179 778 179C484 179 304 407 304 744C304 1083 484 1311 778 1311C981 1311 1134 1197 1178 994H1404C1352 1312 1101 1514 776 1514C364 1514 81 1203 81 744C81 288 365 -24 776 -24Z" transform="translate(0.000 0)"/><path d="M766 -24C1163 -24 1452 288 1452 744C1452 1202 1163 1514 766 1514C369 1514 81 1202 81 744C81 289 369 -24 766 -24ZM766 179C509 179 304 381 304 744C304 1109 509 1311 766 1311C1023 1311 1229 1109 1229 744C1229 381 1023 179 766 179Z" transform="translate(1700.230 0)"/><path d="M136 0H358V806C358 872 357 1001 350 1176C449 1006 530 871 572 805L1081 0H1329V1490H1106V603C1106 549 1108 422 1112 314C1052 420 986 533 951 589L382 1490H136Z" transform="translate(3451.459 0)"/><path d="M48 1295H523V0H746V1295H1219V1490H48Z" transform="translate(5133.689 0)"/><path d="M16 0H252L388 387H989L1121 0H1362L825 1490H557ZM455 576 548 840C589 963 632 1094 692 1287C751 1094 793 963 834 840L924 576Z" transform="translate(6618.918 0)"/><path d="M136 0H710C1062 0 1239 166 1239 419C1239 631 1103 748 930 772V774C1086 822 1180 927 1180 1098C1180 1337 1000 1490 693 1490H136ZM356 187V665H704C901 665 1013 571 1013 420C1013 268 898 187 696 187ZM356 848V1303H690C859 1303 960 1215 960 1075C960 935 859 848 690 848Z" transform="translate(8216.148 0)"/><path d="M358 1490H136V0H358Z" transform="translate(9745.377 0)"/><path d="M136 0H1063V195H358V1490H136Z" transform="translate(10457.607 0)"/></g>
+        <rect x="780" y="613" width="570" height="6" rx="3" fill="url(#line)"/>
+        <circle cx="1371" cy="616" r="5" fill="#007DBF"/>
+    
+    </svg>
