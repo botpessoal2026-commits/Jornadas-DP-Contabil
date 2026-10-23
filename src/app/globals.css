@@ -1295,3 +1295,361 @@ textarea:focus-visible {
     gap: 12px;
   }
 }
+
+/* Administração individual de empresas e vínculos. */
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: 25;
+  min-height: 75px;
+  height: auto;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding-top: 10px;
+  padding-bottom: 10px;
+  background: #fff;
+}
+.topbar > div {
+  min-width: 0;
+}
+.company-switcher {
+  min-width: 190px;
+  max-width: 280px;
+  font-size: 12px;
+}
+.company-switcher select {
+  padding: 8px 10px;
+  min-width: 0;
+  max-width: 100%;
+}
+.company-search,
+.employee-toolbar {
+  display: grid;
+  grid-template-columns: 2fr 1fr 1fr;
+  gap: 16px;
+  align-items: end;
+}
+.company-search label > span {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.company-result-count {
+  margin: 4px 0 18px;
+  color: #52665f;
+}
+.company-directory,
+.employee-cards {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 20px;
+}
+.company-card,
+.employee-card {
+  min-width: 0;
+  margin-bottom: 0;
+}
+.company-card .panel-head {
+  align-items: flex-start;
+}
+.company-card h2,
+.employee-card h2 {
+  overflow-wrap: anywhere;
+}
+.company-identity {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #36584a;
+}
+.company-card-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin: 20px 0;
+}
+.company-card-metrics div {
+  padding: 12px;
+  border-radius: 8px;
+  background: #f1f6f2;
+}
+.company-card-metrics dt {
+  color: #52665f;
+  font-size: 12px;
+}
+.company-card-metrics dd {
+  margin: 8px 0 0;
+  font-size: 24px;
+  font-weight: 700;
+}
+.company-pending-note,
+.company-method-note {
+  font-size: 13px;
+  line-height: 1.7;
+  color: #52665f;
+}
+.company-pending-note {
+  margin: 12px 0;
+}
+.company-card-actions,
+.employee-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 18px;
+}
+.company-card-actions .button,
+.employee-actions .button {
+  min-height: 42px;
+}
+.company-method-note {
+  margin: 22px 0;
+}
+.company-breadcrumb {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 13px;
+  color: #52665f;
+  margin-bottom: 18px;
+}
+.company-breadcrumb button {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: #176c53;
+  text-decoration: underline;
+}
+.company-context-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+}
+.company-context-head > div {
+  min-width: 0;
+}
+.company-context h1 {
+  font-size: 25px;
+  overflow-wrap: anywhere;
+}
+.company-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 0 14px 10px;
+  border-top: 1px solid var(--line);
+}
+.company-tabs .tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 13px 10px;
+  min-height: 44px;
+  color: #52665f;
+}
+.company-tabs .tab.active {
+  color: #14523f;
+  background: #edf6ee;
+}
+.company-overview-metrics,
+.employee-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+  margin-bottom: 22px;
+}
+.company-stat {
+  display: grid;
+  text-align: left;
+  border: 1px solid var(--line);
+  min-height: 140px;
+}
+.company-stat:hover {
+  border-color: #176c53;
+  background: #f4faf5;
+}
+.company-stat .stat-foot {
+  color: #52665f;
+  font-size: 12px;
+}
+.company-next-steps {
+  display: grid;
+  gap: 15px;
+  line-height: 1.7;
+}
+.company-details,
+.employee-data {
+  margin: 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+}
+.company-details div,
+.employee-data div {
+  min-width: 0;
+}
+.company-details dt,
+.employee-data dt {
+  color: #52665f;
+  font-size: 12px;
+  margin-bottom: 6px;
+}
+.company-details dd,
+.employee-data dd {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+.company-status-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 18px;
+}
+.employee-toolbar > p {
+  grid-column: 1 / -1;
+  font-size: 13px;
+}
+.employee-card .panel-body > p {
+  line-height: 1.7;
+  margin-bottom: 8px;
+}
+.employee-name-button {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: #176c53;
+  font: inherit;
+  text-align: left;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.employee-summary-grid .stat {
+  min-width: 0;
+}
+.employee-summary-grid .stat-value {
+  display: block;
+}
+.employee-rest-fields {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.employee-detail .panel-body {
+  line-height: 1.7;
+}
+.employee-detail ul {
+  padding-left: 20px;
+}
+.employee-history,
+.company-history {
+  display: grid;
+  gap: 12px;
+}
+.employee-history article,
+.company-history article {
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: #fff;
+  line-height: 1.7;
+  min-width: 0;
+}
+.employee-history pre,
+.company-history pre {
+  font-size: 12px;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.company-history summary {
+  cursor: pointer;
+  color: #176c53;
+  font-weight: 600;
+}
+.company-history .history-metadata {
+  font-size: 13px;
+  color: #52665f;
+  overflow-wrap: anywhere;
+}
+.history-comparison {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin-top: 12px;
+}
+.scope-note {
+  margin-bottom: 18px;
+}
+@media (max-width: 1100px) {
+  .company-directory,
+  .employee-cards {
+    grid-template-columns: 1fr;
+  }
+  .company-overview-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (max-width: 760px) {
+  .topbar {
+    display: grid;
+    grid-template-columns: 1fr;
+    padding: 10px 16px;
+    gap: 8px;
+  }
+  .top-actions {
+    justify-content: space-between;
+    gap: 10px;
+  }
+  .company-switcher {
+    flex: 1;
+    min-width: 0;
+    max-width: none;
+  }
+  .company-search,
+  .employee-toolbar {
+    grid-template-columns: 1fr;
+  }
+  .company-context-head {
+    flex-direction: column;
+  }
+  .company-tabs {
+    padding: 4px 8px 8px;
+  }
+  .company-tabs .tab {
+    flex: 1 0 44%;
+    white-space: normal;
+    text-align: left;
+  }
+  .company-card-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .company-overview-metrics,
+  .employee-summary-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .company-details,
+  .employee-data,
+  .history-comparison {
+    grid-template-columns: 1fr;
+  }
+  .company-card-actions,
+  .employee-actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .company-card-actions .button,
+  .employee-actions .button {
+    min-height: 44px;
+    white-space: normal;
+  }
+}
+.calendar .day:disabled {
+  opacity: 1;
+  cursor: default;
+}
+button:disabled {
+  cursor: not-allowed;
+}

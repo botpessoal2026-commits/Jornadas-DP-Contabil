@@ -59,6 +59,8 @@ const titles: Record<string, string> = {
   diario: "Carga diária excedida",
   semanal: "Carga semanal excedida",
   contrato_semanal: "Carga contratual excedida",
+  contrato_diario: "Carga diária contratual excedida",
+  descanso_contratual: "Trabalho em descanso contratual",
   contrato_pendente: "Contrato precisa de revisão",
   intrajornada: "Intervalo intrajornada insuficiente",
   interjornada: "Descanso entre jornadas insuficiente",
