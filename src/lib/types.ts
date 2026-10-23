@@ -15,6 +15,19 @@ export type Company = {
   permite_6x1: boolean;
   limite_diario_minutos: number | null;
   usa_banco_horas: boolean;
+  nome_fantasia?: string;
+  codigo_interno?: string;
+  situacao?: "ativa" | "inativa" | "arquivada";
+  endereco?: string;
+  cep?: string;
+  responsavel?: string;
+  contato?: string;
+  observacoes?: string;
+  politica_domingo_feriado?: string;
+  modelo_padrao_id?: string | null;
+  carga_semanal_padrao_minutos?: number | null;
+  created_at?: string | null;
+  updated_at?: string | null;
 };
 export type Employee = {
   id: string;
@@ -24,6 +37,15 @@ export type Employee = {
   horario_contratual: string;
   carga_semanal_minutos?: number | null;
   dias_descanso: number[];
+  matricula?: string;
+  setor?: string;
+  admissao?: string | null;
+  situacao?: "ativo" | "inativo";
+  modelo_padrao_id?: string | null;
+  carga_diaria_minutos?: number | null;
+  regras_especiais?: string;
+  created_at?: string | null;
+  updated_at?: string | null;
 };
 export type Model = {
   id: string;
