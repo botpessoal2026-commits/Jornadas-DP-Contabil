@@ -1,6 +1,6 @@
 "use client";
 import { useId } from "react";
-import { AlertTriangle, BookOpen, ChevronRight } from "lucide-react";
+import { AlertTriangle, BookOpen, Check, ChevronRight } from "lucide-react";
 import type { AlertGroup, AlertOccurrence, AlertSummary } from "@/lib/alerts";
 
 function dateLabel(value: string) {
@@ -112,57 +112,60 @@ export default function ScheduleAlerts(props: Props) {
   const headingId = useId();
   return (
     <section className="schedule-alerts" aria-label="Conferência da escala">
-      <section
-        className="alert-section violation"
-        aria-labelledby={`${headingId}-violations`}
-      >
-        <div className="alert-section-heading">
-          <h3 id={`${headingId}-violations`}>
-            <AlertTriangle size={19} aria-hidden="true" />
-            Violações impeditivas
-          </h3>
-          <p>
-            {countLabel(
-              summary.counts.violations,
-              summary.occurrenceCounts.violations,
-            )}
-          </p>
-        </div>
-        {summary.violations.length ? (
-          summary.violations.map((group) => (
+      {summary.violations.length ? (
+        <section
+          className="alert-section violation"
+          aria-labelledby={`${headingId}-violations`}
+        >
+          <div className="alert-section-heading">
+            <h3 id={`${headingId}-violations`}>
+              <AlertTriangle size={19} aria-hidden="true" />
+              Violações impeditivas
+            </h3>
+            <p>
+              {countLabel(
+                summary.counts.violations,
+                summary.occurrenceCounts.violations,
+              )}
+            </p>
+          </div>
+          {summary.violations.map((group) => (
             <Group key={group.id} {...props} group={group} />
-          ))
-        ) : (
-          <p className="alert-empty">
-            Nenhuma violação detectada nos parâmetros atuais. Confira também os
-            avisos e as fontes pendentes.
-          </p>
-        )}
-      </section>
-      <section
-        className="alert-section attention"
-        aria-labelledby={`${headingId}-attention`}
-      >
-        <div className="alert-section-heading">
-          <h3 id={`${headingId}-attention`}>
-            <AlertTriangle size={19} aria-hidden="true" />
-            Alertas de atenção
-          </h3>
-          <p>
-            {countLabel(
-              summary.counts.attention,
-              summary.occurrenceCounts.attention,
-            )}
-          </p>
-        </div>
-        {summary.attention.length ? (
-          summary.attention.map((group) => (
+          ))}
+        </section>
+      ) : (
+        <p className="alert-clear-row" role="status">
+          <Check size={17} className="alert-clear-icon" aria-hidden="true" />
+          Sem violações impeditivas
+        </p>
+      )}
+      {summary.attention.length ? (
+        <section
+          className="alert-section attention"
+          aria-labelledby={`${headingId}-attention`}
+        >
+          <div className="alert-section-heading">
+            <h3 id={`${headingId}-attention`}>
+              <AlertTriangle size={19} aria-hidden="true" />
+              Alertas de atenção
+            </h3>
+            <p>
+              {countLabel(
+                summary.counts.attention,
+                summary.occurrenceCounts.attention,
+              )}
+            </p>
+          </div>
+          {summary.attention.map((group) => (
             <Group key={group.id} {...props} group={group} />
-          ))
-        ) : (
-          <p className="alert-empty">Nenhum alerta de atenção neste cálculo.</p>
-        )}
-      </section>
+          ))}
+        </section>
+      ) : (
+        <p className="alert-clear-row" role="status">
+          <Check size={17} className="alert-clear-icon" aria-hidden="true" />
+          Sem alertas de atenção
+        </p>
+      )}
       <details
         className="alert-section pending-source"
         data-testid="pending-sources"

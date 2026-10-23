@@ -77,6 +77,8 @@ import LegalFields from "./legal-fields";
 import CompanyDirectory from "./company-directory";
 import CompanyAdmin, { type CompanyView } from "./company-admin";
 import CompanyFields from "./company-fields";
+import ModelFields from "./model-fields";
+import { validateShiftText } from "@/lib/shift-editor";
 import AuditHistory from "./audit-history";
 import { EmployeeDirectory, EmployeeDetails } from "./employee-admin";
 import EmployeeFields from "./employee-fields";
@@ -86,6 +88,7 @@ import ScheduleAlerts from "./schedule-alerts";
 import { alertsForDate, buildAlertSummary } from "@/lib/alerts";
 import { exportCSV, exportExcel, exportPDF } from "@/lib/exports";
 import Brand from "./brand";
+import TeamSchedule from "./team-schedule";
 
 type Page =
   | "inicio"
@@ -113,15 +116,6 @@ const nav = [
   ["regras", "Parâmetros legais", SlidersHorizontal],
   ["historico", "Histórico", History],
 ] as const;
-const dayNames = [
-  "Domingo",
-  "Segunda",
-  "Terça",
-  "Quarta",
-  "Quinta",
-  "Sexta",
-  "Sábado",
-];
 const dateLabel = (s: string) =>
   dateUTC(s).toLocaleDateString("pt-BR", { timeZone: "UTC" });
 const monthLabel = (s: string) =>
@@ -136,33 +130,6 @@ const nextMonth = (s: string) => {
   return d.toISOString().slice(0, 7);
 };
 const pick = (fd: FormData, name: string) => String(fd.get(name) ?? "").trim();
-function parseShifts(value: string): Shift[] {
-  if (!value.trim()) return [];
-  const shifts: Shift[] = [];
-  for (const part of value.split(",")) {
-    const match = part
-      .trim()
-      .match(/^(\d{2}:\d{2})\s*-\s*(\d{2}:\d{2})(?:\s*\+(1))?$/);
-    if (!match)
-      throw new Error(
-        "Use 08:00-12:00, 13:00-17:24. Para turnos noturnos, informe os períodos em ordem, como 22:00-02:00 +1, 03:00-05:00 +1.",
-      );
-    const previous = shifts.at(-1);
-    const startDay =
-      previous && ((previous.startDay ?? 0) === 1 || match[1] < previous.start)
-        ? 1
-        : 0;
-    const shift: Shift = {
-      start: match[1],
-      end: match[2],
-      ...(startDay ? { startDay } : {}),
-      ...(match[3] ? { endDay: 1 } : {}),
-    };
-    span(shift);
-    shifts.push(shift);
-  }
-  return shifts;
-}
 const shiftText = (s: Shift[]) =>
   s
     .map((i) => `${i.start}-${i.end}${span(i)[1] >= 1440 ? " +1" : ""}`)
@@ -325,6 +292,9 @@ export default function Workspace() {
     [restHoliday, setRestHoliday] = useState(true),
     [dirty, setDirty] = useState(false);
   const [editedDay, setEditedDay] = useState<Day | null>(null);
+  const [scheduleView, setScheduleView] = useState<"individual" | "team">(
+    "individual",
+  );
   const [activeDate, setActiveDate] = useState<string | null>(null);
   const [saveState, setSaveState] = useState<
     "idle" | "saving" | "saved" | "error"
@@ -413,6 +383,7 @@ export default function Workspace() {
     } = supabase.auth.onAuthStateChange((event, session) => {
       if (authUserId.current !== (session?.user.id ?? null)) {
         setData(emptyData);
+        setScheduleView("individual");
         setDraft(null);
         setDirty(false);
         setCompanyId("");
@@ -487,20 +458,31 @@ export default function Workspace() {
       s.mes.startsWith(month),
   );
   const schedule = draft ?? saved;
-  const report = useMemo(
-    () =>
-      schedule && company
-        ? evaluate(
-            schedule.dias,
-            data.rules,
-            company,
-            schedule.mes,
-            schedule.modelo_tipo,
-            data.employees.find((e) => e.id === schedule.funcionario_id),
-          )
-        : null,
-    [schedule, company, data.rules, data.employees],
-  );
+  const calculation = useMemo(() => {
+    if (!schedule || !company) return { value: null, error: null };
+    try {
+      return {
+        value: evaluate(
+          schedule.dias,
+          data.rules,
+          company,
+          schedule.mes,
+          schedule.modelo_tipo,
+          data.employees.find((e) => e.id === schedule.funcionario_id),
+        ),
+        error: null,
+      };
+    } catch (error) {
+      return {
+        value: null,
+        error:
+          error instanceof Error
+            ? error.message
+            : "Confira os horários registrados.",
+      };
+    }
+  }, [schedule, company, data.rules, data.employees]);
+  const report = calculation.value;
   const alertContext = {
     companyId: company?.id ?? "",
     companyName: company?.nome ?? "",
@@ -511,7 +493,11 @@ export default function Workspace() {
   const alertSummary = buildAlertSummary(report?.alerts ?? [], alertContext);
   const editedReport = useMemo(
     () =>
-      editedDay && schedule && company && modal?.kind === "dia"
+      editedDay &&
+      schedule &&
+      company &&
+      !calculation.error &&
+      modal?.kind === "dia"
         ? evaluate(
             schedule.dias.map((day) =>
               day.data === editedDay.data ? editedDay : day,
@@ -523,7 +509,15 @@ export default function Workspace() {
             data.employees.find((e) => e.id === schedule.funcionario_id),
           )
         : null,
-    [editedDay, schedule, company, modal?.kind, data.rules, data.employees],
+    [
+      editedDay,
+      schedule,
+      company,
+      calculation.error,
+      modal?.kind,
+      data.rules,
+      data.employees,
+    ],
   );
   const editedSummary = buildAlertSummary(
     editedReport?.alerts ?? [],
@@ -975,11 +969,24 @@ export default function Workspace() {
         );
       }
       if (modal.kind === "modelo") {
-        const padrao: WeekPattern = {};
-        for (let d = 0; d < 7; d++)
-          padrao[String(d)] = parseShifts(pick(fd, `dia${d}`));
         const tipo = pick(fd, "tipo");
-        const turno = parseShifts(pick(fd, "turno"));
+        const parseModelShifts = (value: string) => {
+          const result = validateShiftText(value);
+          if (!result.shifts)
+            throw new Error(result.errors.intervals ?? "Confira os horários.");
+          return result.shifts;
+        };
+        const padrao: WeekPattern =
+          tipo === "12x36"
+            ? ((modal.row?.padrao as WeekPattern | undefined) ?? {})
+            : {};
+        if (tipo !== "12x36")
+          for (let d = 0; d < 7; d++)
+            padrao[String(d)] = parseModelShifts(pick(fd, `dia${d}`));
+        const turno =
+          tipo === "12x36"
+            ? parseModelShifts(pick(fd, "turno"))
+            : ((modal.row?.turno ?? []) as Shift[]);
         if (tipo === "12x36" && (!pick(fd, "ciclo_inicio") || !turno.length))
           throw new Error("O ciclo 12x36 precisa de data inicial e turno.");
         if (tipo === "12x36" && minutes(turno) > 720)
@@ -993,7 +1000,10 @@ export default function Workspace() {
             empresa_id: pick(fd, "empresa_id") || null,
             tipo,
             padrao,
-            ciclo_inicio: pick(fd, "ciclo_inicio") || null,
+            ciclo_inicio:
+              tipo === "12x36"
+                ? pick(fd, "ciclo_inicio") || null
+                : (modal.row?.ciclo_inicio ?? null),
             turno,
           },
           id,
@@ -1189,6 +1199,7 @@ export default function Workspace() {
       setCompanyId(target.id);
       setEmployeeId(person.id);
       setModelId("");
+      setScheduleView("individual");
       setPage("escalas");
     });
   };
@@ -1427,6 +1438,7 @@ export default function Workspace() {
                     hasMore: false,
                   });
                   setData(demoData());
+                  setScheduleView("individual");
                   setMonth("2026-12");
                   setDemo(true);
                   setAuthMode("login");
@@ -1540,6 +1552,7 @@ export default function Workspace() {
                 }
                 setDemo(false);
                 setData(emptyData);
+                setScheduleView("individual");
                 setCompanyId("");
                 setEmployeeId("");
                 setModelId("");
@@ -1591,6 +1604,13 @@ export default function Workspace() {
                     (c) => c.id === event.target.value,
                   );
                   if (target) openCompany(target, currentCompanyView);
+                  else if (page === "escalas" && scheduleView === "team")
+                    changeContext(() => {
+                      setCompanyScopeId(null);
+                      setDetailEmployeeId(null);
+                      setEmployeeId("");
+                      setModelId("");
+                    });
                   else navigate("empresas");
                 }}
               >
@@ -1905,598 +1925,713 @@ export default function Workspace() {
                     de cada pessoa.
                   </p>
                 </div>
-                <span className="pill">
-                  <CalendarDays size={12} />
-                  COMPETÊNCIA {month.slice(5)}/{month.slice(0, 4)}
-                </span>
-              </div>
-              <section className="panel">
-                <div className="panel-body">
-                  <div className="filters">
-                    <Field label="Empresa">
-                      <select
-                        value={companyId}
-                        disabled={!!companyScopeId}
-                        onChange={(e) =>
-                          changeContext(() => {
-                            setCompanyId(e.target.value);
-                            setEmployeeId("");
-                            setModelId("");
-                          })
-                        }
-                      >
-                        <option value="">Selecione uma empresa</option>
-                        {data.companies.map((c) => (
-                          <option key={c.id} value={c.id}>
-                            {c.nome}
-                          </option>
-                        ))}
-                      </select>
-                    </Field>
-                    <Field label="Funcionário">
-                      <select
-                        value={employee?.id ?? ""}
-                        onChange={(e) =>
-                          changeContext(() => {
-                            setEmployeeId(e.target.value);
-                            setModelId("");
-                          })
-                        }
-                      >
-                        <option value="">Selecione um funcionário</option>
-                        {employees.map((e) => (
-                          <option key={e.id} value={e.id}>
-                            {e.nome}
-                          </option>
-                        ))}
-                      </select>
-                    </Field>
-                    <Field label="Modelo de jornada">
-                      <select
-                        value={model?.id ?? ""}
-                        onChange={(e) =>
-                          changeContext(() => setModelId(e.target.value))
-                        }
-                      >
-                        <option value="">Selecione um modelo</option>
-                        {models.map((m) => (
-                          <option
-                            key={m.id}
-                            value={m.id}
-                            disabled={m.tipo === "6x1" && !company?.permite_6x1}
-                          >
-                            {m.nome}
-                            {m.tipo === "6x1" && !company?.permite_6x1
-                              ? " — não autorizado pela empresa"
-                              : ""}
-                          </option>
-                        ))}
-                      </select>
-                    </Field>
-                    <Field label="Mês da escala">
-                      <input
-                        type="month"
-                        value={month}
-                        min="1900-01"
-                        max="2200-12"
-                        onChange={(e) => {
-                          if (/^\d{4}-\d{2}$/.test(e.target.value))
-                            changeContext(() => setMonth(e.target.value));
-                        }}
-                      />
-                    </Field>
-                  </div>
-                  {scheduleReadOnly && (
-                    <p className="warning-text mt-4">
-                      Consulta preservada: reative a empresa e o vínculo para
-                      gerar ou alterar jornadas. As exportações continuam
-                      disponíveis.
-                    </p>
-                  )}
-                  {employee && (
-                    <p className="muted mt-4">
-                      Modelo para novas prévias: {model?.nome ?? "não definido"}
-                      . A escolha individual tem precedência sobre o padrão da
-                      empresa. Alterar esse cadastro não reescreve escalas já
-                      salvas.
-                    </p>
-                  )}
-                  <div className="actions justify-between mt-5">
-                    <label className="check-label">
-                      <input
-                        type="checkbox"
-                        checked={restHoliday}
-                        onChange={(e) => setRestHoliday(e.target.checked)}
-                      />
-                      Folgar nos feriados cadastrados
-                    </label>
+                <div className="schedule-heading-actions">
+                  <span className="pill">
+                    <CalendarDays size={12} />
+                    COMPETÊNCIA {month.slice(5)}/{month.slice(0, 4)}
+                  </span>
+                  <div
+                    className="actions schedule-view-switch"
+                    role="group"
+                    aria-label="Visualização das escalas"
+                  >
                     <button
-                      className="button primary"
-                      disabled={
-                        scheduleReadOnly ||
-                        busy ||
-                        !employee ||
-                        !model ||
-                        !company ||
-                        (model.tipo === "6x1" && !company.permite_6x1)
-                      }
-                      onClick={() =>
-                        perform(async () => {
-                          if (!employee || !model) return;
-                          if (
-                            dirty &&
-                            !window.confirm(
-                              "Substituir a prévia e descartar as alterações?",
-                            )
-                          )
-                            return;
-                          const s = createSchedule(employee, model, month);
-                          setDraft(s);
-                          setDirty(true);
-                          setSaveState("idle");
-                          notify(
-                            "Prévia gerada. Confira as semanas, os alertas e salve a escala.",
-                          );
-                        })
-                      }
+                      type="button"
+                      className={`button ${scheduleView === "individual" ? "primary" : ""}`}
+                      aria-pressed={scheduleView === "individual"}
+                      onClick={() => setScheduleView("individual")}
                     >
-                      <RefreshCw size={14} />
-                      Gerar prévia
+                      Por funcionário
+                    </button>
+                    <button
+                      type="button"
+                      className={`button ${scheduleView === "team" ? "primary" : ""}`}
+                      aria-pressed={scheduleView === "team"}
+                      onClick={() => setScheduleView("team")}
+                    >
+                      Grade da equipe
                     </button>
                   </div>
                 </div>
-              </section>
-              {!schedule ? (
-                <section className="panel">
-                  <Empty
-                    text="Selecione empresa, funcionário, modelo e mês para gerar uma prévia."
-                    action={
-                      !data.rules.length ? (
-                        <button
-                          className="button"
-                          onClick={() => navigate("regras")}
-                        >
-                          Configurar parâmetros legais
-                        </button>
-                      ) : undefined
-                    }
-                  />
-                </section>
-              ) : (
+              </div>
+              {scheduleView === "team" ? (
                 <>
-                  <div className="stats">
-                    <Stat
-                      label="Horas no mês"
-                      value={report ? formatMinutes(report.total) : "—"}
-                      note="Total por data civil, com hora noturna reduzida"
-                      icon={Clock3}
-                    />
-                    <Stat
-                      label="Dias trabalhados"
-                      value={
-                        schedule.dias.filter(
-                          (d) =>
-                            d.data.startsWith(month) &&
-                            computeDay(d, data.rules, schedule.dias).worked > 0,
-                        ).length
-                      }
-                      note="Feriados e folgas conforme calendário"
-                      icon={CalendarDays}
-                    />
-                    <Stat
-                      label="Divisor mensal"
-                      value={
-                        report?.periods
-                          .map((p) => p.divisor ?? "—")
-                          .filter((v, i, a) => a.indexOf(v) === i)
-                          .join(" / ") ?? "—"
-                      }
-                      note="Carga semanal × fator parametrizado"
-                      icon={SlidersHorizontal}
-                    />
-                    <Stat
-                      label="Violações impeditivas"
-                      value={alertSummary.counts.violations}
-                      note={`${alertSummary.counts.attention} avisos · ${alertSummary.counts.pendingSources} fontes/regras pendentes`}
-                      icon={ShieldCheck}
-                    />
-                  </div>
-                  <div className="banner neutral">
-                    <BookOpen size={17} />
-                    <div>
-                      As semanas incluem dias dos meses vizinhos. Dias
-                      adjacentes sem escala salva são projeções do modelo, não
-                      registros confirmados. O total mensal usa somente os dias
-                      desta competência. Clique em um dia para ajustar.
-                    </div>
-                  </div>
-                  {report && (
-                    <div className="periods">
-                      {report.periods.map((p) => (
-                        <div className="period" key={p.start}>
-                          <span className="period-dates">
-                            {dateLabel(p.start)} — {dateLabel(p.end)}
-                          </span>
-                          <br />
-                          <strong>{p.rule?.nome ?? "Regime ausente"}</strong>
-                          <div>
-                            Divisor: <b>{p.divisor ?? "Não configurado"}</b>
-                            {!p.rule?.confirmado && (
-                              <span className="ml-2 text-[#ac8034]">
-                                · a conferir
-                              </span>
-                            )}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                  <ScheduleAlerts
-                    summary={alertSummary}
-                    onSelect={openAlertDay}
-                    onConfigure={() => navigate("regras")}
-                    onEmployeeReview={() =>
-                      employee && edit("funcionario", employee)
-                    }
-                  />
-                  <section className="panel" aria-label="Calendário da escala">
-                    <div className="panel-head">
-                      <div>
-                        <h2>{monthLabel(month)}</h2>
-                        <p className="subtitle !mt-1 !text-xs">
-                          {schedule.nome_funcionario ?? employee?.nome}{" "}
-                          <span className="mx-1">·</span> {schedule.modelo_nome}
-                        </p>
-                      </div>
-                      <div className="actions">
-                        <button
-                          className="button small"
-                          disabled={busy || !company}
-                          onClick={() =>
-                            perform(async () => {
-                              if (company)
-                                await exportPDF(
-                                  schedule,
-                                  data.rules,
-                                  company,
-                                  employee,
-                                );
-                            })
-                          }
-                        >
-                          <FileText size={14} />
-                          PDF
-                        </button>
-                        <button
-                          className="button small"
-                          disabled={busy || !company}
-                          onClick={() =>
-                            perform(async () => {
-                              if (company)
-                                await exportExcel(
-                                  schedule,
-                                  data.rules,
-                                  company,
-                                  data.employees.find(
-                                    (e) => e.id === schedule.funcionario_id,
-                                  ),
-                                );
-                            })
-                          }
-                        >
-                          <FileSpreadsheet size={14} />
-                          Excel
-                        </button>
-                        <button
-                          className="button small"
-                          disabled={busy}
-                          onClick={() =>
-                            exportCSV(
-                              schedule,
-                              data.rules,
-                              data.employees.find(
-                                (e) => e.id === schedule.funcionario_id,
-                              ),
-                            )
-                          }
-                        >
-                          <Download size={14} />
-                          CSV
-                        </button>
-                        <button
-                          className="button primary small"
-                          disabled={
-                            busy || scheduleReadOnly || (!dirty && !!saved)
-                          }
-                          onClick={() => perform(saveCurrent)}
-                        >
-                          <Check size={14} />
-                          {saveState === "saving"
-                            ? "Salvando…"
-                            : dirty || !saved
-                              ? "Salvar escala"
-                              : "Escala salva"}
-                        </button>
-                      </div>
-                    </div>
-                    <div
-                      className="calendar"
-                      role="grid"
-                      aria-label={`Calendário de ${monthLabel(month)}`}
-                    >
-                      {["SEG", "TER", "QUA", "QUI", "SEX", "SÁB", "DOM"].map(
-                        (n) => (
-                          <div
-                            role="columnheader"
-                            className="cal-heading"
-                            key={n}
-                          >
-                            {n}
-                          </div>
-                        ),
-                      )}
-                      {Array.from(
-                        {
-                          length: (dateUTC(`${month}-01`).getUTCDay() + 6) % 7,
-                        },
-                        (_, i) => (
-                          <div key={`blank-${i}`} className="day blank" />
-                        ),
-                      )}
-                      {schedule.dias
-                        .filter((d) => d.data.startsWith(month))
-                        .map((d) => {
-                          const dayAlerts = alertsForDate(
-                            alertSummary.groups,
-                            d.data,
-                          );
-                          const violations = dayAlerts.filter(
-                            (a) => a.category === "violation",
-                          );
-                          const attention = dayAlerts.filter(
-                            (a) => a.category === "attention",
-                          );
-                          const problem = violations.length
-                            ? "violation"
-                            : attention.length
-                              ? "attention"
-                              : "";
-                          return (
-                            <button
-                              key={d.data}
-                              id={`escala-dia-${d.data}`}
-                              data-date={d.data}
-                              data-problem={problem || undefined}
-                              aria-selected={activeDate === d.data}
-                              role="gridcell"
-                              disabled={scheduleReadOnly}
-                              className={`day ${computeDay(d, data.rules, schedule.dias).worked === 0 ? "rest" : ""} ${problem ? `has-${problem}` : ""} ${activeDate === d.data ? "selected" : ""}`}
-                              onClick={() => edit("dia", d)}
-                              aria-label={`${dateLabel(d.data)}${violations.length ? `, ${violations.length} violações impeditivas` : attention.length ? `, ${attention.length} avisos` : ""}: ${d.intervalos.length ? shiftText(d.intervalos) : computeDay(d, data.rules, schedule.dias).worked > 0 ? "Continuação do turno anterior" : "Folga"}. Editar.`}
-                            >
-                              <span className="day-number">
-                                <span className="desktop-day">
-                                  {+d.data.slice(-2)}
-                                </span>
-                                <span className="mobile-date">
-                                  {dateLabel(d.data)}
-                                </span>
-                                {problem && (
-                                  <AlertTriangle size={16} aria-hidden="true" />
-                                )}
-                              </span>
-                              {d.intervalos.length ? (
-                                <>
-                                  <span className="day-time">
-                                    {d.intervalos.map((s, i) => (
-                                      <span key={i} className="block">
-                                        {s.start} — {s.end}
-                                        {span(s)[1] >= 1440 ? " +1" : ""}
-                                      </span>
-                                    ))}
-                                  </span>
-                                  <span className="day-hours">
-                                    {formatMinutes(
-                                      computeDay(d, data.rules, schedule.dias)
-                                        .computed,
-                                    )}
-                                  </span>
-                                </>
-                              ) : (
-                                <span className="rest-label">
-                                  {computeDay(d, data.rules, schedule.dias)
-                                    .worked > 0 ? (
-                                    <>
-                                      Continuação
-                                      <br />
-                                      {formatMinutes(
-                                        computeDay(d, data.rules, schedule.dias)
-                                          .computed,
-                                      )}
-                                    </>
-                                  ) : (
-                                    "Folga"
-                                  )}
-                                </span>
-                              )}
-                              {problem && (
-                                <span className={`day-problem ${problem}`}>
-                                  {violations.length
-                                    ? `${violations.length} impedimento(s)`
-                                    : `${attention.length} aviso(s)`}
-                                </span>
-                              )}
-                              {d.feriado && (
-                                <span className="holiday">{d.feriado}</span>
-                              )}
-                              {d.observacao && (
-                                <span className="holiday special-day-label">
-                                  Com observação
-                                </span>
-                              )}
-                            </button>
-                          );
-                        })}
-                    </div>
-                    <div className="legend">
-                      <span>
-                        <span className="dot work-dot mr-1" />
-                        Dia trabalhado
-                      </span>
-                      <span>
-                        <span className="dot rest-dot mr-1" />
-                        Folga
-                      </span>
-                      <span>
-                        <AlertTriangle size={15} aria-hidden="true" />
-                        Borda vermelha: impedimento · âmbar: atenção
-                      </span>
-                      <span
-                        className="ml-auto save-status"
-                        role="status"
-                        aria-live="polite"
-                      >
-                        {saveLabel}
-                        {dirty ? " · alterações locais" : ""}
-                      </span>
+                  <section className="panel">
+                    <div className="panel-body team-month-filter">
+                      <Field label="Mês da escala">
+                        <input
+                          type="month"
+                          value={month}
+                          min="1900-01"
+                          max="2200-12"
+                          onChange={(event) => {
+                            const value = event.target.value;
+                            if (/^\d{4}-\d{2}$/.test(value))
+                              changeContext(() => setMonth(value));
+                          }}
+                        />
+                      </Field>
+                      <p className="muted">
+                        Use “Empresa ativa” no topo para filtrar a equipe ou
+                        reunir suas empresas em “Visão consolidada”.
+                      </p>
                     </div>
                   </section>
-                  <div className="grid2">
-                    <section className="panel">
-                      <div className="panel-head">
-                        <h2>Conferência semanal</h2>
-                        <span className="pill">SEG A DOM</span>
-                      </div>
-                      <div className="table-wrap">
-                        <table>
-                          <thead>
-                            <tr>
-                              <th>Semana</th>
-                              <th>Horas / teto</th>
-                              <th>Descansos</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {report?.weeks.map((w) => (
-                              <tr
-                                key={w.start}
-                                className={
-                                  alertSummary.violations.some((group) =>
-                                    group.periods.some(
-                                      (p) =>
-                                        p.start <= w.end && p.end >= w.start,
-                                    ),
-                                  )
-                                    ? "week-conflict"
-                                    : ""
+                  <TeamSchedule
+                    key={month}
+                    data={data}
+                    month={month}
+                    companyId={companyScopeId}
+                    onOpen={employeeSchedules}
+                    hasUnsavedPreview={dirty}
+                    onReturnToPreview={() => setScheduleView("individual")}
+                  />
+                </>
+              ) : (
+                <>
+                  <section className="panel">
+                    <div className="panel-body">
+                      <div className="filters">
+                        <Field label="Empresa">
+                          <select
+                            value={companyId}
+                            disabled={!!companyScopeId}
+                            onChange={(e) => {
+                              const value = e.target.value;
+                              changeContext(() => {
+                                setCompanyId(value);
+                                setEmployeeId("");
+                                setModelId("");
+                              });
+                            }}
+                          >
+                            <option value="">Selecione uma empresa</option>
+                            {data.companies.map((c) => (
+                              <option key={c.id} value={c.id}>
+                                {c.nome}
+                              </option>
+                            ))}
+                          </select>
+                        </Field>
+                        <Field label="Funcionário">
+                          <select
+                            value={employee?.id ?? ""}
+                            onChange={(e) => {
+                              const value = e.target.value;
+                              changeContext(() => {
+                                setEmployeeId(value);
+                                setModelId("");
+                              });
+                            }}
+                          >
+                            <option value="">Selecione um funcionário</option>
+                            {employees.map((e) => (
+                              <option key={e.id} value={e.id}>
+                                {e.nome}
+                              </option>
+                            ))}
+                          </select>
+                        </Field>
+                        <Field label="Modelo de jornada">
+                          <select
+                            value={model?.id ?? ""}
+                            onChange={(e) => {
+                              const value = e.target.value;
+                              changeContext(() => setModelId(value));
+                            }}
+                          >
+                            <option value="">Selecione um modelo</option>
+                            {models.map((m) => (
+                              <option
+                                key={m.id}
+                                value={m.id}
+                                disabled={
+                                  m.tipo === "6x1" && !company?.permite_6x1
                                 }
                               >
-                                <td>
-                                  <button
-                                    className="week-link"
-                                    onClick={() =>
-                                      openAlertDay(
-                                        w.start < `${month}-01`
-                                          ? `${month}-01`
-                                          : w.start,
-                                      )
-                                    }
-                                  >
-                                    {dateLabel(w.start).slice(0, 5)} a{" "}
-                                    {dateLabel(w.end).slice(0, 5)}
-                                    {alertSummary.violations.some((group) =>
-                                      group.periods.some(
-                                        (p) =>
-                                          p.start <= w.end && p.end >= w.start,
-                                      ),
-                                    )
-                                      ? " · conflito"
-                                      : ""}
-                                  </button>
-                                </td>
-                                <td>
-                                  <span
-                                    className={`pill ${w.limit !== undefined && w.total > w.limit ? "warn" : ""}`}
-                                  >
-                                    {formatMinutes(w.total)} /{" "}
-                                    {w.limit !== undefined
-                                      ? formatMinutes(w.limit)
-                                      : "—"}
-                                  </span>
-                                </td>
-                                <td>{w.rests} dia(s)</td>
-                              </tr>
+                                {m.nome}
+                                {m.tipo === "6x1" && !company?.permite_6x1
+                                  ? " — não autorizado pela empresa"
+                                  : ""}
+                              </option>
                             ))}
-                          </tbody>
-                        </table>
+                          </select>
+                        </Field>
+                        <Field label="Mês da escala">
+                          <input
+                            type="month"
+                            value={month}
+                            min="1900-01"
+                            max="2200-12"
+                            onChange={(e) => {
+                              const value = e.target.value;
+                              if (/^\d{4}-\d{2}$/.test(value))
+                                changeContext(() => setMonth(value));
+                            }}
+                          />
+                        </Field>
+                      </div>
+                      {scheduleReadOnly && (
+                        <p className="warning-text mt-4">
+                          Consulta preservada: reative a empresa e o vínculo
+                          para gerar ou alterar jornadas. As exportações
+                          continuam disponíveis.
+                        </p>
+                      )}
+                      {employee && (
+                        <p className="muted mt-4">
+                          Modelo para novas prévias:{" "}
+                          {model?.nome ?? "não definido"}. A escolha individual
+                          tem precedência sobre o padrão da empresa. Alterar
+                          esse cadastro não reescreve escalas já salvas.
+                        </p>
+                      )}
+                      <div className="actions justify-between mt-5">
+                        <label className="check-label">
+                          <input
+                            type="checkbox"
+                            checked={restHoliday}
+                            onChange={(e) => setRestHoliday(e.target.checked)}
+                          />
+                          Folgar nos feriados cadastrados
+                        </label>
+                        <button
+                          className="button primary"
+                          disabled={
+                            scheduleReadOnly ||
+                            busy ||
+                            !employee ||
+                            !model ||
+                            !company ||
+                            (model.tipo === "6x1" && !company.permite_6x1)
+                          }
+                          onClick={() =>
+                            perform(async () => {
+                              if (!employee || !model) return;
+                              if (
+                                dirty &&
+                                !window.confirm(
+                                  "Substituir a prévia e descartar as alterações?",
+                                )
+                              )
+                                return;
+                              const s = createSchedule(employee, model, month);
+                              setDraft(s);
+                              setDirty(true);
+                              setSaveState("idle");
+                              notify(
+                                "Prévia gerada. Confira as semanas, os alertas e salve a escala.",
+                              );
+                            })
+                          }
+                        >
+                          <RefreshCw size={14} />
+                          Gerar prévia
+                        </button>
+                      </div>
+                    </div>
+                  </section>
+                  {!schedule ? (
+                    <section className="panel">
+                      <Empty
+                        text="Selecione empresa, funcionário, modelo e mês para gerar uma prévia."
+                        action={
+                          !data.rules.length ? (
+                            <button
+                              className="button"
+                              onClick={() => navigate("regras")}
+                            >
+                              Configurar parâmetros legais
+                            </button>
+                          ) : undefined
+                        }
+                      />
+                    </section>
+                  ) : calculation.error ? (
+                    <section className="panel">
+                      <div className="panel-body" role="alert">
+                        <h2>Não foi possível conferir esta escala</h2>
+                        <p className="subtitle">{calculation.error}</p>
+                        <p className="subtitle">
+                          Os registros foram preservados. Revise os horários do
+                          modelo antes de gerar outra prévia. Nenhuma conclusão
+                          de conformidade está disponível para esta escala.
+                        </p>
                       </div>
                     </section>
-                    <section className="panel">
-                      <div className="panel-head">
-                        <h2>Continuidade do planejamento</h2>
-                        <Copy size={17} className="muted" />
-                      </div>
-                      <div className="panel-body">
-                        <p className="subtitle !mt-0">
-                          Recrie as escalas em{" "}
-                          <strong>{monthLabel(nextMonth(month))}</strong> com os
-                          mesmos modelos. Os feriados e as vigências serão
-                          recalculados. Horários e ajustes são copiados por
-                          ocorrência do dia da semana (ex.: primeira
-                          segunda-feira). Feriados de origem não viram folgas no
-                          destino. Ciclos 12×36 seguem a âncora, sem copiar
-                          ajustes manuais.
-                        </p>
-                        <div className="actions mt-5">
-                          <button
-                            className="button"
-                            disabled={busy || dirty || scheduleReadOnly}
-                            onClick={() => perform(() => duplicate(false))}
-                          >
-                            <Copy size={14} />
-                            Este funcionário
-                          </button>
-                          <button
-                            className="button"
-                            disabled={busy || dirty || scheduleReadOnly}
-                            onClick={() => perform(() => duplicate(true))}
-                          >
-                            <Building2 size={14} />
-                            Toda a empresa
-                          </button>
-                        </div>
-                        {dirty && (
-                          <p className="warning-text mt-3">
-                            Salve a prévia antes de duplicar.
-                          </p>
-                        )}
-                        {model && (
-                          <div className="section-divider mt-6 pt-5 border-t">
-                            <h3>Texto para o Domínio</h3>
-                            <p className="subtitle text-xs">
-                              {dominioText(model)}
+                  ) : (
+                    <>
+                      <ScheduleAlerts
+                        summary={alertSummary}
+                        onSelect={openAlertDay}
+                        onConfigure={() => navigate("regras")}
+                        onEmployeeReview={() =>
+                          employee && edit("funcionario", employee)
+                        }
+                      />
+                      <section
+                        className="panel"
+                        aria-label="Calendário da escala"
+                      >
+                        <div className="panel-head">
+                          <div>
+                            <h2>{monthLabel(month)}</h2>
+                            <p className="subtitle !mt-1 !text-xs">
+                              {schedule.nome_funcionario ?? employee?.nome}{" "}
+                              <span className="mx-1">·</span>{" "}
+                              {schedule.modelo_nome}
                             </p>
+                          </div>
+                          <div className="actions">
                             <button
-                              className="button small mt-3"
+                              className="button small"
+                              disabled={busy || !company}
                               onClick={() =>
                                 perform(async () => {
-                                  await navigator.clipboard.writeText(
-                                    dominioText(model),
-                                  );
-                                  notify(
-                                    "Texto do modelo copiado. Ajustes manuais do calendário não alteram este texto.",
-                                  );
+                                  if (company)
+                                    await exportPDF(
+                                      schedule,
+                                      data.rules,
+                                      company,
+                                      employee,
+                                    );
                                 })
                               }
                             >
-                              <Copy size={13} />
-                              Copiar horário do modelo
+                              <FileText size={14} />
+                              PDF
+                            </button>
+                            <button
+                              className="button small"
+                              disabled={busy || !company}
+                              onClick={() =>
+                                perform(async () => {
+                                  if (company)
+                                    await exportExcel(
+                                      schedule,
+                                      data.rules,
+                                      company,
+                                      data.employees.find(
+                                        (e) => e.id === schedule.funcionario_id,
+                                      ),
+                                    );
+                                })
+                              }
+                            >
+                              <FileSpreadsheet size={14} />
+                              Excel
+                            </button>
+                            <button
+                              className="button small"
+                              disabled={busy}
+                              onClick={() =>
+                                exportCSV(
+                                  schedule,
+                                  data.rules,
+                                  data.employees.find(
+                                    (e) => e.id === schedule.funcionario_id,
+                                  ),
+                                )
+                              }
+                            >
+                              <Download size={14} />
+                              CSV
+                            </button>
+                            <button
+                              className="button primary small"
+                              disabled={
+                                busy || scheduleReadOnly || (!dirty && !!saved)
+                              }
+                              onClick={() => perform(saveCurrent)}
+                            >
+                              <Check size={14} />
+                              {saveState === "saving"
+                                ? "Salvando…"
+                                : dirty || !saved
+                                  ? "Salvar escala"
+                                  : "Escala salva"}
                             </button>
                           </div>
-                        )}
+                        </div>
+                        <div
+                          className="calendar"
+                          role="grid"
+                          aria-label={`Calendário de ${monthLabel(month)}`}
+                        >
+                          {[
+                            "SEG",
+                            "TER",
+                            "QUA",
+                            "QUI",
+                            "SEX",
+                            "SÁB",
+                            "DOM",
+                          ].map((n) => (
+                            <div
+                              role="columnheader"
+                              className="cal-heading"
+                              key={n}
+                            >
+                              {n}
+                            </div>
+                          ))}
+                          {Array.from(
+                            {
+                              length:
+                                (dateUTC(`${month}-01`).getUTCDay() + 6) % 7,
+                            },
+                            (_, i) => (
+                              <div key={`blank-${i}`} className="day blank" />
+                            ),
+                          )}
+                          {schedule.dias
+                            .filter((d) => d.data.startsWith(month))
+                            .map((d) => {
+                              const dayAlerts = alertsForDate(
+                                alertSummary.groups,
+                                d.data,
+                              );
+                              const violations = dayAlerts.filter(
+                                (a) => a.category === "violation",
+                              );
+                              const attention = dayAlerts.filter(
+                                (a) => a.category === "attention",
+                              );
+                              const problem = violations.length
+                                ? "violation"
+                                : attention.length
+                                  ? "attention"
+                                  : "";
+                              return (
+                                <button
+                                  key={d.data}
+                                  id={`escala-dia-${d.data}`}
+                                  data-date={d.data}
+                                  data-problem={problem || undefined}
+                                  aria-selected={activeDate === d.data}
+                                  role="gridcell"
+                                  disabled={scheduleReadOnly}
+                                  className={`day ${computeDay(d, data.rules, schedule.dias).worked === 0 ? "rest" : ""} ${problem ? `has-${problem}` : ""} ${activeDate === d.data ? "selected" : ""}`}
+                                  onClick={() => edit("dia", d)}
+                                  aria-label={`${dateLabel(d.data)}${violations.length ? `, ${violations.length} violações impeditivas` : attention.length ? `, ${attention.length} avisos` : ""}: ${d.intervalos.length ? shiftText(d.intervalos) : computeDay(d, data.rules, schedule.dias).worked > 0 ? "Continuação do turno anterior" : "Folga"}. Editar.`}
+                                >
+                                  <span className="day-number">
+                                    <span className="desktop-day">
+                                      {+d.data.slice(-2)}
+                                    </span>
+                                    <span className="mobile-date">
+                                      {dateLabel(d.data)}
+                                    </span>
+                                    {problem && (
+                                      <AlertTriangle
+                                        size={16}
+                                        aria-hidden="true"
+                                      />
+                                    )}
+                                  </span>
+                                  {d.intervalos.length ? (
+                                    <>
+                                      <span className="day-time">
+                                        {d.intervalos.map((s, i) => (
+                                          <span key={i} className="block">
+                                            {s.start} — {s.end}
+                                            {span(s)[1] >= 1440 ? " +1" : ""}
+                                          </span>
+                                        ))}
+                                      </span>
+                                      <span className="day-hours">
+                                        {formatMinutes(
+                                          computeDay(
+                                            d,
+                                            data.rules,
+                                            schedule.dias,
+                                          ).computed,
+                                        )}
+                                      </span>
+                                    </>
+                                  ) : (
+                                    <span className="rest-label">
+                                      {computeDay(d, data.rules, schedule.dias)
+                                        .worked > 0 ? (
+                                        <>
+                                          Continuação
+                                          <br />
+                                          {formatMinutes(
+                                            computeDay(
+                                              d,
+                                              data.rules,
+                                              schedule.dias,
+                                            ).computed,
+                                          )}
+                                        </>
+                                      ) : (
+                                        "Folga"
+                                      )}
+                                    </span>
+                                  )}
+                                  {problem && (
+                                    <span className={`day-problem ${problem}`}>
+                                      {violations.length
+                                        ? `${violations.length} impedimento(s)`
+                                        : `${attention.length} aviso(s)`}
+                                    </span>
+                                  )}
+                                  {d.feriado && (
+                                    <span className="holiday">{d.feriado}</span>
+                                  )}
+                                  {d.observacao && (
+                                    <span className="holiday special-day-label">
+                                      Com observação
+                                    </span>
+                                  )}
+                                </button>
+                              );
+                            })}
+                        </div>
+                        <div className="legend">
+                          <span>
+                            <span className="dot work-dot mr-1" />
+                            Dia trabalhado
+                          </span>
+                          <span>
+                            <span className="dot rest-dot mr-1" />
+                            Folga
+                          </span>
+                          <span>
+                            <span
+                              className="legend-border violation"
+                              aria-hidden="true"
+                            />
+                            Borda vermelha: impedimento
+                          </span>
+                          <span>
+                            <span
+                              className="legend-border attention"
+                              aria-hidden="true"
+                            />
+                            Borda âmbar: atenção
+                          </span>
+                          <span
+                            className="ml-auto save-status"
+                            role="status"
+                            aria-live="polite"
+                          >
+                            {saveLabel}
+                            {dirty ? " · alterações locais" : ""}
+                          </span>
+                        </div>
+                      </section>
+                      <div className="stats">
+                        <Stat
+                          label="Horas no mês"
+                          value={report ? formatMinutes(report.total) : "—"}
+                          note="Total por data civil, com hora noturna reduzida"
+                          icon={Clock3}
+                        />
+                        <Stat
+                          label="Dias trabalhados"
+                          value={
+                            schedule.dias.filter(
+                              (d) =>
+                                d.data.startsWith(month) &&
+                                computeDay(d, data.rules, schedule.dias)
+                                  .worked > 0,
+                            ).length
+                          }
+                          note="Feriados e folgas conforme calendário"
+                          icon={CalendarDays}
+                        />
+                        <Stat
+                          label="Divisor mensal"
+                          value={
+                            report?.periods
+                              .map((p) => p.divisor ?? "—")
+                              .filter((v, i, a) => a.indexOf(v) === i)
+                              .join(" / ") ?? "—"
+                          }
+                          note="Carga semanal × fator parametrizado"
+                          icon={SlidersHorizontal}
+                        />
+                        <Stat
+                          label="Violações impeditivas"
+                          value={alertSummary.counts.violations}
+                          note={`${alertSummary.counts.attention} avisos · ${alertSummary.counts.pendingSources} fontes/regras pendentes`}
+                          icon={ShieldCheck}
+                        />
                       </div>
-                    </section>
-                  </div>
+                      <div className="banner neutral">
+                        <BookOpen size={17} />
+                        <div>
+                          As semanas incluem dias dos meses vizinhos. Dias
+                          adjacentes sem escala salva são projeções do modelo,
+                          não registros confirmados. O total mensal usa somente
+                          os dias desta competência. Clique em um dia para
+                          ajustar.
+                        </div>
+                      </div>
+                      {report && (
+                        <div className="periods">
+                          {report.periods.map((p) => (
+                            <div className="period" key={p.start}>
+                              <span className="period-dates">
+                                {dateLabel(p.start)} — {dateLabel(p.end)}
+                              </span>
+                              <br />
+                              <strong>
+                                {p.rule?.nome ?? "Regime ausente"}
+                              </strong>
+                              <div>
+                                Divisor: <b>{p.divisor ?? "Não configurado"}</b>
+                                {!p.rule?.confirmado && (
+                                  <span className="ml-2 text-[#ac8034]">
+                                    · a conferir
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      <div className="grid2">
+                        <section className="panel">
+                          <div className="panel-head">
+                            <h2>Conferência semanal</h2>
+                            <span className="pill">SEG A DOM</span>
+                          </div>
+                          <div className="table-wrap">
+                            <table>
+                              <thead>
+                                <tr>
+                                  <th>Semana</th>
+                                  <th>Horas / teto</th>
+                                  <th>Descansos</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {report?.weeks.map((w) => (
+                                  <tr
+                                    key={w.start}
+                                    className={
+                                      alertSummary.violations.some((group) =>
+                                        group.periods.some(
+                                          (p) =>
+                                            p.start <= w.end &&
+                                            p.end >= w.start,
+                                        ),
+                                      )
+                                        ? "week-conflict"
+                                        : ""
+                                    }
+                                  >
+                                    <td>
+                                      <button
+                                        className="week-link"
+                                        onClick={() =>
+                                          openAlertDay(
+                                            w.start < `${month}-01`
+                                              ? `${month}-01`
+                                              : w.start,
+                                          )
+                                        }
+                                      >
+                                        {dateLabel(w.start).slice(0, 5)} a{" "}
+                                        {dateLabel(w.end).slice(0, 5)}
+                                        {alertSummary.violations.some((group) =>
+                                          group.periods.some(
+                                            (p) =>
+                                              p.start <= w.end &&
+                                              p.end >= w.start,
+                                          ),
+                                        )
+                                          ? " · conflito"
+                                          : ""}
+                                      </button>
+                                    </td>
+                                    <td>
+                                      <span
+                                        className={`pill ${w.limit !== undefined && w.total > w.limit ? "warn" : ""}`}
+                                      >
+                                        {formatMinutes(w.total)} /{" "}
+                                        {w.limit !== undefined
+                                          ? formatMinutes(w.limit)
+                                          : "—"}
+                                      </span>
+                                    </td>
+                                    <td>{w.rests} dia(s)</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        </section>
+                        <section className="panel">
+                          <div className="panel-head">
+                            <h2>Continuidade do planejamento</h2>
+                            <Copy size={17} className="muted" />
+                          </div>
+                          <div className="panel-body">
+                            <p className="subtitle !mt-0">
+                              Recrie as escalas em{" "}
+                              <strong>{monthLabel(nextMonth(month))}</strong>{" "}
+                              com os mesmos modelos. Os feriados e as vigências
+                              serão recalculados. Horários e ajustes são
+                              copiados por ocorrência do dia da semana (ex.:
+                              primeira segunda-feira). Feriados de origem não
+                              viram folgas no destino. Ciclos 12×36 seguem a
+                              âncora, sem copiar ajustes manuais.
+                            </p>
+                            <div className="actions mt-5">
+                              <button
+                                className="button"
+                                disabled={busy || dirty || scheduleReadOnly}
+                                onClick={() => perform(() => duplicate(false))}
+                              >
+                                <Copy size={14} />
+                                Este funcionário
+                              </button>
+                              <button
+                                className="button"
+                                disabled={busy || dirty || scheduleReadOnly}
+                                onClick={() => perform(() => duplicate(true))}
+                              >
+                                <Building2 size={14} />
+                                Toda a empresa
+                              </button>
+                            </div>
+                            {dirty && (
+                              <p className="warning-text mt-3">
+                                Salve a prévia antes de duplicar.
+                              </p>
+                            )}
+                            {model && (
+                              <div className="section-divider mt-6 pt-5 border-t">
+                                <h3>Texto para o Domínio</h3>
+                                <p className="subtitle text-xs">
+                                  {dominioText(model)}
+                                </p>
+                                <button
+                                  className="button small mt-3"
+                                  onClick={() =>
+                                    perform(async () => {
+                                      await navigator.clipboard.writeText(
+                                        dominioText(model),
+                                      );
+                                      notify(
+                                        "Texto do modelo copiado. Ajustes manuais do calendário não alteram este texto.",
+                                      );
+                                    })
+                                  }
+                                >
+                                  <Copy size={13} />
+                                  Copiar horário do modelo
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        </section>
+                      </div>
+                    </>
+                  )}
                 </>
               )}
             </>
@@ -2904,106 +3039,12 @@ export default function Workspace() {
                 />
               )}
               {modal.kind === "modelo" && (
-                <>
-                  {(companyScopeId || modal.row?.id) && (
-                    <input
-                      type="hidden"
-                      name="empresa_id"
-                      value={
-                        companyScopeId ?? String(modal.row?.empresa_id ?? "")
-                      }
-                    />
-                  )}
-                  <Field label="Nome do modelo">
-                    <input
-                      name="nome"
-                      required
-                      defaultValue={String(modal.row?.nome ?? "")}
-                    />
-                  </Field>
-                  <Field label="Tipo de jornada">
-                    <select
-                      name="tipo"
-                      defaultValue={String(modal.row?.tipo ?? "5x2")}
-                    >
-                      {["5x2", "6x1", "12x36", "turnos", "personalizado"].map(
-                        (t) => (
-                          <option key={t}>{t}</option>
-                        ),
-                      )}
-                    </select>
-                  </Field>
-                  <div className="span2">
-                    <Field label="Disponível para">
-                      <select
-                        name="empresa_id"
-                        disabled={!!companyScopeId || !!modal.row?.id}
-                        defaultValue={String(modal.row?.empresa_id ?? "")}
-                      >
-                        <option value="">Todas as minhas empresas</option>
-                        {data.companies.map((c) => (
-                          <option key={c.id} value={c.id}>
-                            {c.nome}
-                          </option>
-                        ))}
-                      </select>
-                    </Field>
-                  </div>
-                  <p className="subtitle span2 !text-xs !mt-0">
-                    Use 08:00-12:00, 13:00-17:24. Deixe em branco para folga.
-                    Horários noturnos: 22:00-05:00 +1. Os dias abaixo valem para
-                    modelos semanais e turnos.
-                  </p>
-                  <div className="week-editor span2">
-                    {dayNames.map((n, i) => (
-                      <div className="week-row" key={i}>
-                        <label htmlFor={`dia${i}`}>{n.slice(0, 3)}</label>
-                        <input
-                          id={`dia${i}`}
-                          name={`dia${i}`}
-                          aria-label={`Horários de ${n}`}
-                          placeholder="Folga"
-                          defaultValue={shiftText(
-                            (modal.row?.padrao as WeekPattern | undefined)?.[
-                              String(i)
-                            ] ??
-                              (i > 0 && i < 6
-                                ? [
-                                    { start: "08:00", end: "12:00" },
-                                    { start: "13:00", end: "17:24" },
-                                  ]
-                                : []),
-                          )}
-                        />
-                      </div>
-                    ))}
-                  </div>
-                  <div className="section-divider span2 border-t pt-4">
-                    <h3>Somente para ciclo 12×36</h3>
-                    <p className="subtitle !text-xs mb-4">
-                      O ciclo alterna dia de turno e dia de descanso a partir da
-                      data inicial. Cadastre intervalos e confira a CCT.
-                    </p>
-                    <div className="form-grid">
-                      <Field label="Primeiro dia de turno">
-                        <input
-                          name="ciclo_inicio"
-                          type="date"
-                          defaultValue={String(modal.row?.ciclo_inicio ?? "")}
-                        />
-                      </Field>
-                      <Field label="Turno e pausas">
-                        <input
-                          name="turno"
-                          placeholder="07:00-12:00, 13:00-19:00"
-                          defaultValue={shiftText(
-                            (modal.row?.turno ?? []) as Shift[],
-                          )}
-                        />
-                      </Field>
-                    </div>
-                  </div>
-                </>
+                <ModelFields
+                  key={`${companyScopeId ?? "all"}:${modal.row?.id ?? "new"}`}
+                  model={modal.row as unknown as Model | undefined}
+                  companies={data.companies}
+                  companyId={companyScopeId ?? undefined}
+                />
               )}
               {modal.kind === "feriado" && (
                 <>
