@@ -8,6 +8,18 @@ import type {
   Schedule,
 } from "./types";
 import { initialHolidays, initialModels, initialRules } from "./presets";
+export type AuditLog = {
+  id: string;
+  tabela: string;
+  acao: string;
+  alterado_em: string;
+  registro_id?: string;
+  empresa_id?: string | null;
+  ator_id?: string | null;
+  antes?: Record<string, unknown> | null;
+  depois?: Record<string, unknown> | null;
+  campos?: string[];
+};
 export type Data = {
   companies: Company[];
   employees: Employee[];
@@ -15,7 +27,7 @@ export type Data = {
   rules: LegalRule[];
   holidays: Holiday[];
   schedules: Schedule[];
-  logs: { id: string; tabela: string; acao: string; alterado_em: string }[];
+  logs: AuditLog[];
 };
 export const emptyData: Data = {
   companies: [],
@@ -48,7 +60,9 @@ export async function loadData(): Promise<Data> {
         : t === "log_alteracoes"
           ? supabase!
               .from(t)
-              .select("id,tabela,acao,alterado_em")
+              .select(
+                "id,tabela,acao,alterado_em,registro_id,empresa_id,ator_id,antes,depois,campos",
+              )
               .order("alterado_em", { ascending: false })
               .limit(100)
           : supabase!.from(t).select("*"),
@@ -64,8 +78,9 @@ export async function saveRow(table: string, value: object, id?: string) {
   const q = id
     ? supabase.from(table).update(value).eq("id", id)
     : supabase.from(table).insert(value);
-  const { error } = await q;
+  const { data, error } = await q.select("id").single();
   if (error) throw new Error(error.message);
+  return data.id as string;
 }
 export async function saveSchedules(schedules: Schedule[]) {
   if (!supabase) throw new Error("Supabase não configurado.");
@@ -98,4 +113,23 @@ export async function importHolidays(year: number) {
     });
     if (error) throw new Error(error.message);
   }
+}
+
+/** Page inside the authorized company; avoids dropping a quiet company's history. */
+export async function loadCompanyLogs(
+  companyId: string,
+  offset = 0,
+): Promise<AuditLog[]> {
+  if (!supabase) throw new Error("Supabase não configurado.");
+  const { data, error } = await supabase
+    .from("log_alteracoes")
+    .select(
+      "id,tabela,acao,alterado_em,registro_id,empresa_id,ator_id,antes,depois,campos",
+    )
+    .eq("empresa_id", companyId)
+    .order("alterado_em", { ascending: false })
+    .order("id", { ascending: false })
+    .range(offset, offset + 99);
+  if (error) throw new Error(error.message);
+  return data as AuditLog[];
 }

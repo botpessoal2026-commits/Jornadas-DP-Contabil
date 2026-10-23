@@ -42,6 +42,8 @@ import {
   importDefaults,
   importHolidays,
   loadData,
+  loadCompanyLogs,
+  type AuditLog,
   saveRow,
   saveSchedules,
   type Data,
@@ -72,6 +74,13 @@ import type {
 import { contractMinutesFromHours } from "@/lib/contract";
 import { demoData } from "@/lib/demo";
 import LegalFields from "./legal-fields";
+import CompanyDirectory from "./company-directory";
+import CompanyAdmin, { type CompanyView } from "./company-admin";
+import CompanyFields from "./company-fields";
+import AuditHistory from "./audit-history";
+import { EmployeeDirectory, EmployeeDetails } from "./employee-admin";
+import EmployeeFields from "./employee-fields";
+import { scopeCompanyData, resolveEmployeeModel } from "@/lib/company-context";
 import DayEditor from "./day-editor";
 import ScheduleAlerts from "./schedule-alerts";
 import { alertsForDate, buildAlertSummary } from "@/lib/alerts";
@@ -85,7 +94,10 @@ type Page =
   | "modelos"
   | "feriados"
   | "regras"
-  | "historico";
+  | "historico"
+  | "company-overview"
+  | "company-settings"
+  | "employee-detail";
 type Modal = {
   kind: "empresa" | "funcionario" | "modelo" | "feriado" | "regra" | "dia";
   row?: Record<string, unknown>;
@@ -317,6 +329,54 @@ export default function Workspace() {
     "idle" | "saving" | "saved" | "error"
   >("idle");
   const operationPending = useRef(false);
+  const [companyScopeId, setCompanyScopeId] = useState<string | null>(null);
+  const [detailEmployeeId, setDetailEmployeeId] = useState<string | null>(null);
+  const [companyAudit, setCompanyAudit] = useState<{
+    companyId: string;
+    logs: AuditLog[];
+    loading: boolean;
+    hasMore: boolean;
+    error?: string;
+  }>({ companyId: "", logs: [], loading: false, hasMore: false });
+  useEffect(() => {
+    if (!companyScopeId || demo || !user) return;
+    const target = companyScopeId;
+    let alive = true;
+    setCompanyAudit({
+      companyId: target,
+      logs: [],
+      loading: true,
+      hasMore: false,
+    });
+    loadCompanyLogs(target)
+      .then((logs) => {
+        if (alive)
+          setCompanyAudit({
+            companyId: target,
+            logs,
+            loading: false,
+            hasMore: logs.length === 100,
+          });
+      })
+      .catch((error) => {
+        if (alive)
+          setCompanyAudit({
+            companyId: target,
+            logs: [],
+            loading: false,
+            hasMore: false,
+            error: error.message,
+          });
+      });
+    return () => {
+      alive = false;
+    };
+  }, [companyScopeId, demo, user?.id, data.logs]);
+  const [confirmation, setConfirmation] = useState<{
+    title: string;
+    message: string;
+    accept: () => void;
+  } | null>(null);
   const notify = (text: string, error = false) => setToast({ text, error });
   useEffect(() => {
     const leave = (e: BeforeUnloadEvent) => {
@@ -357,6 +417,15 @@ export default function Workspace() {
         setCompanyId("");
         setEmployeeId("");
         setModelId("");
+        setCompanyScopeId(null);
+        setDetailEmployeeId(null);
+        setConfirmation(null);
+        setCompanyAudit({
+          companyId: "",
+          logs: [],
+          loading: false,
+          hasMore: false,
+        });
         authUserId.current = session?.user.id ?? null;
       }
       setUser(session?.user ?? null);
@@ -387,7 +456,6 @@ export default function Workspace() {
   }, [user, demo]);
   useEffect(() => {
     if (!companyId && data.companies.length) setCompanyId(data.companies[0].id);
-    if (!modelId && data.models.length) setModelId(data.models[0].id);
   }, [data, companyId, modelId]);
   const company = data.companies.find((c) => c.id === companyId);
   const employees = data.employees.filter((e) => e.empresa_id === companyId);
@@ -395,7 +463,22 @@ export default function Workspace() {
   const models = data.models.filter(
     (m) => !m.empresa_id || m.empresa_id === companyId,
   );
-  const model = models.find((m) => m.id === modelId) ?? models[0];
+  const model =
+    employee && company
+      ? resolveEmployeeModel(employee, company, models, modelId || undefined)
+      : models[0];
+  const scopedCompany = data.companies.find((c) => c.id === companyScopeId);
+  const scopedData = companyScopeId
+    ? scopeCompanyData(data, companyScopeId)
+    : data;
+  if (!demo && companyScopeId && companyAudit.companyId === companyScopeId)
+    scopedData.logs = companyAudit.logs;
+  const companyReadOnly =
+    !!company && (company.situacao ?? "ativa") !== "ativa";
+  const scheduleReadOnly = companyReadOnly || employee?.situacao === "inativo";
+  const detailEmployee = scopedData.employees.find(
+    (e) => e.id === detailEmployeeId,
+  );
   const saved = data.schedules.find(
     (s) =>
       s.empresa_id === companyId &&
@@ -469,16 +552,21 @@ export default function Workspace() {
             : "Salvo";
   const pendingRules = data.rules.filter((r) => !r.confirmado).length;
   const changeContext = (callback: () => void) => {
-    if (
-      dirty &&
-      !window.confirm("Há alterações não salvas. Descartar e trocar a seleção?")
-    )
-      return;
-    callback();
-    setDraft(null);
-    setDirty(false);
-    setSaveState("idle");
-    setActiveDate(null);
+    const apply = () => {
+      callback();
+      setDraft(null);
+      setDirty(false);
+      setSaveState("idle");
+      setActiveDate(null);
+    };
+    if (dirty)
+      setConfirmation({
+        title: "Descartar alterações não salvas?",
+        message:
+          "A prévia atual será descartada ao mudar de empresa ou seleção. As escalas salvas serão preservadas.",
+        accept: apply,
+      });
+    else apply();
   };
   async function perform(action: () => Promise<void>) {
     if (operationPending.current) return;
@@ -506,36 +594,101 @@ export default function Workspace() {
     value: Record<string, unknown>,
     id?: string,
   ) {
+    const key = (
+      {
+        empresas: "companies",
+        funcionarios: "employees",
+        modelos_jornada: "models",
+        parametros_legais: "rules",
+        feriados: "holidays",
+      } as const
+    )[
+      table as
+        | "empresas"
+        | "funcionarios"
+        | "modelos_jornada"
+        | "parametros_legais"
+        | "feriados"
+    ];
+    const before = data[key]?.find((r) => r.id === id) as unknown as
+      Record<string, unknown> | undefined;
+    const targetCompanyId = String(
+      value.empresa_id ?? before?.empresa_id ?? "",
+    );
+    if (
+      ["funcionarios", "modelos_jornada"].includes(table) &&
+      targetCompanyId
+    ) {
+      const targetCompany = data.companies.find(
+        (c) => c.id === targetCompanyId,
+      );
+      if (!targetCompany || (targetCompany.situacao ?? "ativa") !== "ativa")
+        throw new Error(
+          "Reative a empresa antes de alterar seus cadastros e jornadas.",
+        );
+      if (companyScopeId && targetCompanyId !== companyScopeId)
+        throw new Error("A operação deve pertencer à empresa ativa.");
+    }
+    if (
+      table === "funcionarios" &&
+      before &&
+      before.empresa_id !== value.empresa_id
+    )
+      throw new Error(
+        "A mudança de empresa exige um fluxo de transferência com preservação do vínculo. Edite o cadastro na empresa de origem.",
+      );
+    const selectedDefault = value.modelo_padrao_id
+      ? data.models.find((m) => m.id === value.modelo_padrao_id)
+      : undefined;
+    const defaultCompanyId = table === "empresas" ? id : targetCompanyId;
+    if (
+      value.modelo_padrao_id &&
+      (!selectedDefault ||
+        (selectedDefault.empresa_id &&
+          selectedDefault.empresa_id !== defaultCompanyId))
+    )
+      throw new Error(
+        "O modelo padrão deve pertencer a esta empresa ou ser uma referência compartilhada.",
+      );
+    let rowId = id ?? crypto.randomUUID();
     if (demo) {
-      const key = (
-        {
-          empresas: "companies",
-          funcionarios: "employees",
-          modelos_jornada: "models",
-          parametros_legais: "rules",
-          feriados: "holidays",
-        } as const
-      )[
-        table as
-          | "empresas"
-          | "funcionarios"
-          | "modelos_jornada"
-          | "parametros_legais"
-          | "feriados"
-      ];
+      const after = {
+        ...before,
+        ...value,
+        id: rowId,
+        updated_at: new Date().toISOString(),
+        ...(before ? {} : { created_at: new Date().toISOString() }),
+      };
       setData(
-        (d) =>
+        (current) =>
           ({
-            ...d,
+            ...current,
             [key]: id
-              ? d[key].map((r) => (r.id === id ? { ...r, ...value } : r))
-              : [...d[key], { ...value, id: crypto.randomUUID() }],
+              ? current[key].map((r) => (r.id === id ? after : r))
+              : [...current[key], after],
+            logs: [
+              {
+                id: crypto.randomUUID(),
+                tabela: table,
+                acao: before ? "UPDATE" : "INSERT",
+                alterado_em: new Date().toISOString(),
+                registro_id: rowId,
+                empresa_id:
+                  table === "empresas" ? rowId : targetCompanyId || null,
+                ator_id: "demo-user",
+                antes: before ?? null,
+                depois: after,
+                campos: Object.keys(value),
+              },
+              ...current.logs,
+            ],
           }) as Data,
       );
     } else {
-      await saveRow(table, value, id);
+      rowId = await saveRow(table, value, id);
       await refresh();
     }
+    return rowId;
   }
   function withNeighbors(s: Schedule): Schedule {
     const actual = new Map<string, Day>();
@@ -560,6 +713,15 @@ export default function Workspace() {
     targetMonth: string,
   ): Schedule {
     if (!company) throw new Error("Selecione uma empresa.");
+    if ((company.situacao ?? "ativa") !== "ativa" || e.situacao === "inativo")
+      throw new Error(
+        "Empresa e vínculo precisam estar ativos para gerar escalas.",
+      );
+    if (
+      e.empresa_id !== company.id ||
+      (m.empresa_id && m.empresa_id !== company.id)
+    )
+      throw new Error("Funcionário e modelo devem pertencer à empresa ativa.");
     if (m.tipo === "6x1" && !company.permite_6x1)
       notify(
         "A empresa não permite 6x1. A prévia mostrará o alerta; confira a CCT.",
@@ -578,20 +740,60 @@ export default function Workspace() {
     });
   }
   async function persistSchedules(items: Schedule[]) {
-    if (demo)
-      setData((d) => ({
-        ...d,
-        schedules: [
-          ...d.schedules.filter(
-            (s) =>
-              !items.some(
-                (i) => s.funcionario_id === i.funcionario_id && s.mes === i.mes,
-              ),
-          ),
-          ...items.map((i) => ({ ...i, id: i.id || crypto.randomUUID() })),
-        ],
-      }));
-    else {
+    for (const item of items) {
+      const target = data.companies.find((c) => c.id === item.empresa_id);
+      const person = data.employees.find(
+        (e) => e.id === item.funcionario_id && e.empresa_id === item.empresa_id,
+      );
+      if (
+        !target ||
+        !person ||
+        (target.situacao ?? "ativa") !== "ativa" ||
+        person.situacao === "inativo"
+      )
+        throw new Error(
+          "Não é permitido gravar escalas de empresa ou vínculo inativo.",
+        );
+      if (companyScopeId && item.empresa_id !== companyScopeId)
+        throw new Error("A escala deve pertencer à empresa ativa.");
+    }
+    if (demo) {
+      setData((current) => {
+        const changed = items.map((item) => {
+          const before = current.schedules.find(
+            (old) =>
+              old.funcionario_id === item.funcionario_id &&
+              old.mes === item.mes,
+          );
+          return { ...item, id: item.id || before?.id || crypto.randomUUID() };
+        });
+        const events = changed.map((item) => {
+          const before = current.schedules.find((old) => old.id === item.id);
+          return {
+            id: crypto.randomUUID(),
+            tabela: "escalas",
+            acao: before ? "UPDATE" : "INSERT",
+            alterado_em: new Date().toISOString(),
+            registro_id: item.id,
+            empresa_id: item.empresa_id,
+            ator_id: "demo-user",
+            antes: before ? { ...before } : null,
+            depois: { ...item },
+            campos: ["dias", "modelo_id"],
+          };
+        });
+        return {
+          ...current,
+          schedules: [
+            ...current.schedules.filter(
+              (old) => !changed.some((item) => item.id === old.id),
+            ),
+            ...changed,
+          ],
+          logs: [...events, ...current.logs],
+        };
+      });
+    } else {
       await saveSchedules(items);
       await refresh();
     }
@@ -710,12 +912,25 @@ export default function Workspace() {
     await perform(async () => {
       if (modal.kind === "empresa") {
         const cnpj = pick(fd, "cnpj").replace(/\D/g, "");
-        if (!cnpjValid(cnpj))
+        if (cnpj && !cnpjValid(cnpj))
           throw new Error("Informe um CNPJ válido com 14 dígitos.");
         const limit = pick(fd, "limite");
         await rowSave(
           "empresas",
           {
+            nome_fantasia: pick(fd, "nome_fantasia"),
+            codigo_interno: pick(fd, "codigo_interno"),
+            situacao: pick(fd, "situacao") || "ativa",
+            endereco: pick(fd, "endereco"),
+            cep: pick(fd, "cep").replace(/\D/g, ""),
+            responsavel: pick(fd, "responsavel"),
+            contato: pick(fd, "contato"),
+            observacoes: pick(fd, "observacoes"),
+            politica_domingo_feriado: pick(fd, "politica_domingo_feriado"),
+            modelo_padrao_id: pick(fd, "modelo_padrao_id") || null,
+            carga_semanal_padrao_minutos: contractMinutesFromHours(
+              pick(fd, "carga_semanal_padrao"),
+            ),
             nome: pick(fd, "nome"),
             cnpj,
             cidade: pick(fd, "cidade"),
@@ -731,12 +946,24 @@ export default function Workspace() {
         );
       }
       if (modal.kind === "funcionario") {
+        const dailyContract = contractMinutesFromHours(
+          pick(fd, "carga_diaria"),
+        );
+        if (dailyContract && dailyContract > 1440)
+          throw new Error("A carga diária deve ser de até 24 horas.");
         await rowSave(
           "funcionarios",
           {
             empresa_id: pick(fd, "empresa_id"),
             nome: pick(fd, "nome"),
             cargo: pick(fd, "cargo"),
+            matricula: pick(fd, "matricula"),
+            setor: pick(fd, "setor"),
+            admissao: pick(fd, "admissao") || null,
+            situacao: pick(fd, "situacao") || "ativo",
+            modelo_padrao_id: pick(fd, "modelo_padrao_id") || null,
+            carga_diaria_minutos: dailyContract,
+            regras_especiais: pick(fd, "regras_especiais"),
             horario_contratual: pick(fd, "horario"),
             carga_semanal_minutos: contractMinutesFromHours(
               pick(fd, "carga_semanal"),
@@ -867,11 +1094,48 @@ export default function Workspace() {
     });
   }
   const edit = (kind: Modal["kind"], row?: object) => {
+    if (
+      scopedCompany &&
+      (scopedCompany.situacao ?? "ativa") !== "ativa" &&
+      ["funcionario", "modelo", "dia"].includes(kind)
+    ) {
+      notify(
+        "Esta empresa está em consulta. Reative-a antes de alterar funcionários ou escalas.",
+        true,
+      );
+      return;
+    }
     if (kind === "dia") {
+      if (scheduleReadOnly) {
+        notify(
+          "A escala está disponível somente para consulta enquanto a empresa ou vínculo estiver inativo.",
+          true,
+        );
+        return;
+      }
       setEditedDay(row as Day);
       setActiveDate((row as Day).data);
     }
-    setModal({ kind, row: row as Record<string, unknown> });
+    let targetRow = row as Record<string, unknown> | undefined;
+    if (kind === "modelo" && companyScopeId) {
+      if (targetRow && !targetRow.empresa_id) {
+        const { id: templateId, ...template } = targetRow;
+        void templateId;
+        targetRow = {
+          ...template,
+          nome: `${template.nome} · ${scopedCompany?.nome}`,
+          empresa_id: companyScopeId,
+        };
+      } else if (!targetRow) targetRow = { empresa_id: companyScopeId };
+    }
+    if (kind === "feriado" && companyScopeId) {
+      notify(
+        "O cadastro legal é compartilhado. Use o calendário global para editar a data oficial; isso não define o funcionamento da empresa.",
+        true,
+      );
+      return;
+    }
+    setModal({ kind, row: targetRow });
   };
   const openAlertDay = (date: string) => {
     const day = schedule?.dias.find((d) => d.data === date);
@@ -881,10 +1145,149 @@ export default function Workspace() {
     cell?.focus({ preventScroll: true });
     edit("dia", day);
   };
-  const navigate = (p: Page) => {
-    setPage(p);
-    setMobile(false);
+  const navigate = (target: Page) =>
+    changeContext(() => {
+      setPage(target);
+      setCompanyScopeId(null);
+      setDetailEmployeeId(null);
+      setMobile(false);
+    });
+  const openCompany = (target: Company, view: CompanyView = "visao_geral") =>
+    changeContext(() => {
+      setCompanyScopeId(target.id);
+      setCompanyId(target.id);
+      setEmployeeId("");
+      setModelId("");
+      setDetailEmployeeId(null);
+      setPage(
+        view === "visao_geral"
+          ? "company-overview"
+          : view === "configuracoes"
+            ? "company-settings"
+            : view,
+      );
+      setMobile(false);
+    });
+  const openEmployee = (person: Employee) => {
+    const target = data.companies.find((c) => c.id === person.empresa_id);
+    if (!target) return;
+    changeContext(() => {
+      setCompanyScopeId(target.id);
+      setCompanyId(target.id);
+      setEmployeeId(person.id);
+      setModelId("");
+      setDetailEmployeeId(person.id);
+      setPage("employee-detail");
+    });
   };
+  const employeeSchedules = (person: Employee) => {
+    const target = data.companies.find((c) => c.id === person.empresa_id);
+    if (!target) return;
+    changeContext(() => {
+      setCompanyScopeId(target.id);
+      setCompanyId(target.id);
+      setEmployeeId(person.id);
+      setModelId("");
+      setPage("escalas");
+    });
+  };
+  const currentCompanyView: CompanyView =
+    page === "company-settings"
+      ? "configuracoes"
+      : [
+            "funcionarios",
+            "modelos",
+            "escalas",
+            "feriados",
+            "historico",
+          ].includes(page)
+        ? (page as CompanyView)
+        : "visao_geral";
+  const changeCompanyStatus = (status: NonNullable<Company["situacao"]>) => {
+    if (!scopedCompany) return;
+    setConfirmation({
+      title:
+        status === "ativa"
+          ? "Reativar empresa?"
+          : "Alterar situação da empresa?",
+      message: `${scopedCompany.nome}: situação ${status}. Funcionários, escalas e histórico serão preservados. Empresas inativas ou arquivadas ficam disponíveis para consulta, sem novas operações.`,
+      accept: () => {
+        void perform(async () => {
+          await rowSave("empresas", { situacao: status }, scopedCompany.id);
+          notify(
+            "Situação da empresa atualizada; nenhum vínculo ou escala foi excluído.",
+          );
+        });
+      },
+    });
+  };
+  const loadMoreHistory = async () => {
+    if (
+      !companyScopeId ||
+      companyAudit.loading ||
+      companyAudit.companyId !== companyScopeId
+    )
+      return;
+    const target = companyScopeId;
+    const offset = companyAudit.logs.length;
+    setCompanyAudit((current) => ({
+      ...current,
+      loading: true,
+      error: undefined,
+    }));
+    try {
+      const logs = await loadCompanyLogs(target, offset);
+      setCompanyAudit((current) =>
+        current.companyId === target
+          ? {
+              ...current,
+              logs: [
+                ...current.logs,
+                ...logs.filter(
+                  (entry) => !current.logs.some((old) => old.id === entry.id),
+                ),
+              ],
+              loading: false,
+              hasMore: logs.length === 100,
+            }
+          : current,
+      );
+    } catch (error) {
+      setCompanyAudit((current) =>
+        current.companyId === target
+          ? {
+              ...current,
+              loading: false,
+              error:
+                error instanceof Error
+                  ? error.message
+                  : "Não foi possível carregar o histórico.",
+            }
+          : current,
+      );
+    }
+  };
+  const toggleEmployeeStatus = (person: Employee) =>
+    setConfirmation({
+      title:
+        person.situacao === "inativo"
+          ? "Reativar vínculo?"
+          : "Inativar vínculo?",
+      message: `${person.nome}: o cadastro e as escalas anteriores serão preservados. Vínculos inativos não recebem novas escalas.`,
+      accept: () => {
+        void perform(async () => {
+          await rowSave(
+            "funcionarios",
+            {
+              ...person,
+              situacao: person.situacao === "inativo" ? "ativo" : "inativo",
+            },
+            person.id,
+          );
+          notify("Situação do vínculo atualizada.");
+        });
+      },
+    });
   if (!authReady)
     return (
       <div className="min-h-screen grid place-items-center">
@@ -1011,6 +1414,21 @@ export default function Workspace() {
               <button
                 className="button w-full"
                 onClick={() => {
+                  setCompanyScopeId(null);
+                  setDetailEmployeeId(null);
+                  setConfirmation(null);
+                  setCompanyId("");
+                  setEmployeeId("");
+                  setModelId("");
+                  setDraft(null);
+                  setDirty(false);
+                  setPage("inicio");
+                  setCompanyAudit({
+                    companyId: "",
+                    logs: [],
+                    loading: false,
+                    hasMore: false,
+                  });
                   setData(demoData());
                   setMonth("2026-12");
                   setDemo(true);
@@ -1025,6 +1443,29 @@ export default function Workspace() {
             </div>
           </div>
         </section>
+        {confirmation && (
+          <Dialog
+            title={confirmation.title}
+            close={() => setConfirmation(null)}
+          >
+            <p className="subtitle !mt-0">{confirmation.message}</p>
+            <div className="dialog-actions">
+              <button className="button" onClick={() => setConfirmation(null)}>
+                Cancelar
+              </button>
+              <button
+                className="button primary"
+                onClick={() => {
+                  const action = confirmation.accept;
+                  setConfirmation(null);
+                  action();
+                }}
+              >
+                Confirmar
+              </button>
+            </div>
+          </Dialog>
+        )}
         {toast && (
           <div className={`toast ${toast.error ? "error" : ""}`} role="status">
             {toast.text}
@@ -1114,6 +1555,15 @@ export default function Workspace() {
                 setCompanyId("");
                 setEmployeeId("");
                 setModelId("");
+                setCompanyScopeId(null);
+                setDetailEmployeeId(null);
+                setConfirmation(null);
+                setCompanyAudit({
+                  companyId: "",
+                  logs: [],
+                  loading: false,
+                  hasMore: false,
+                });
                 setDraft(null);
                 setDirty(false);
                 setPage("inicio");
@@ -1136,10 +1586,34 @@ export default function Workspace() {
             </button>
             <span>
               Área de trabalho <span className="mx-2 text-[#b3c0b4]">/</span>{" "}
-              <strong>{nav.find((n) => n[0] === page)?.[1]}</strong>
+              <strong>
+                {scopedCompany?.nome ?? nav.find((n) => n[0] === page)?.[1]}
+              </strong>
             </span>
           </div>
           <div className="top-actions">
+            <label className="company-switcher">
+              Empresa ativa
+              <select
+                aria-label="Empresa ativa"
+                value={companyScopeId ?? ""}
+                onChange={(event) => {
+                  const target = data.companies.find(
+                    (c) => c.id === event.target.value,
+                  );
+                  if (target) openCompany(target, currentCompanyView);
+                  else navigate("empresas");
+                }}
+              >
+                <option value="">Visão consolidada</option>
+                {data.companies.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.nome}
+                    {c.situacao === "arquivada" ? " · arquivada" : ""}
+                  </option>
+                ))}
+              </select>
+            </label>
             <span className="date-label">Departamento Pessoal</span>
             <span className={`pill ${demo ? "warn" : ""}`}>
               {demo ? "Demonstração" : "Acesso protegido"}
@@ -1157,6 +1631,19 @@ export default function Workspace() {
                 conferência.
               </span>
             </div>
+          )}
+          {scopedCompany && (
+            <CompanyAdmin
+              company={scopedCompany}
+              data={data}
+              month={month}
+              view={currentCompanyView}
+              onNavigate={(view) => openCompany(scopedCompany, view)}
+              onBack={() => navigate("empresas")}
+              onEditCompany={() => edit("empresa", scopedCompany)}
+              onStatusChange={changeCompanyStatus}
+              busy={busy}
+            />
           )}
           {page === "inicio" && (
             <>
@@ -1275,6 +1762,8 @@ export default function Workspace() {
                                     onClick={() =>
                                       changeContext(() => {
                                         setCompanyId(s.empresa_id);
+                                        setCompanyScopeId(s.empresa_id);
+                                        setModelId("");
                                         setEmployeeId(s.funcionario_id);
                                         setMonth(s.mes.slice(0, 7));
                                         setPage("escalas");
@@ -1436,10 +1925,12 @@ export default function Workspace() {
                     <Field label="Empresa">
                       <select
                         value={companyId}
+                        disabled={!!companyScopeId}
                         onChange={(e) =>
                           changeContext(() => {
                             setCompanyId(e.target.value);
                             setEmployeeId("");
+                            setModelId("");
                           })
                         }
                       >
@@ -1455,7 +1946,10 @@ export default function Workspace() {
                       <select
                         value={employee?.id ?? ""}
                         onChange={(e) =>
-                          changeContext(() => setEmployeeId(e.target.value))
+                          changeContext(() => {
+                            setEmployeeId(e.target.value);
+                            setModelId("");
+                          })
                         }
                       >
                         <option value="">Selecione um funcionário</option>
@@ -1501,6 +1995,21 @@ export default function Workspace() {
                       />
                     </Field>
                   </div>
+                  {scheduleReadOnly && (
+                    <p className="warning-text mt-4">
+                      Consulta preservada: reative a empresa e o vínculo para
+                      gerar ou alterar jornadas. As exportações continuam
+                      disponíveis.
+                    </p>
+                  )}
+                  {employee && (
+                    <p className="muted mt-4">
+                      Modelo para novas prévias: {model?.nome ?? "não definido"}
+                      . A escolha individual tem precedência sobre o padrão da
+                      empresa. Alterar esse cadastro não reescreve escalas já
+                      salvas.
+                    </p>
+                  )}
                   <div className="actions justify-between mt-5">
                     <label className="check-label">
                       <input
@@ -1513,6 +2022,7 @@ export default function Workspace() {
                     <button
                       className="button primary"
                       disabled={
+                        scheduleReadOnly ||
                         busy ||
                         !employee ||
                         !model ||
@@ -1704,7 +2214,9 @@ export default function Workspace() {
                         </button>
                         <button
                           className="button primary small"
-                          disabled={busy || (!dirty && !!saved)}
+                          disabled={
+                            busy || scheduleReadOnly || (!dirty && !!saved)
+                          }
                           onClick={() => perform(saveCurrent)}
                         >
                           <Check size={14} />
@@ -1766,6 +2278,7 @@ export default function Workspace() {
                               data-problem={problem || undefined}
                               aria-selected={activeDate === d.data}
                               role="gridcell"
+                              disabled={scheduleReadOnly}
                               className={`day ${computeDay(d, data.rules, schedule.dias).worked === 0 ? "rest" : ""} ${problem ? `has-${problem}` : ""} ${activeDate === d.data ? "selected" : ""}`}
                               onClick={() => edit("dia", d)}
                               aria-label={`${dateLabel(d.data)}${violations.length ? `, ${violations.length} violações impeditivas` : attention.length ? `, ${attention.length} avisos` : ""}: ${d.intervalos.length ? shiftText(d.intervalos) : computeDay(d, data.rules, schedule.dias).worked > 0 ? "Continuação do turno anterior" : "Folga"}. Editar.`}
@@ -1946,7 +2459,7 @@ export default function Workspace() {
                         <div className="actions mt-5">
                           <button
                             className="button"
-                            disabled={busy || dirty}
+                            disabled={busy || dirty || scheduleReadOnly}
                             onClick={() => perform(() => duplicate(false))}
                           >
                             <Copy size={14} />
@@ -1954,7 +2467,7 @@ export default function Workspace() {
                           </button>
                           <button
                             className="button"
-                            disabled={busy || dirty}
+                            disabled={busy || dirty || scheduleReadOnly}
                             onClick={() => perform(() => duplicate(true))}
                           >
                             <Building2 size={14} />
@@ -1998,187 +2511,35 @@ export default function Workspace() {
             </>
           )}
           {page === "empresas" && (
-            <>
-              <div className="page-head">
-                <div>
-                  <div className="eyebrow">SEUS CLIENTES</div>
-                  <h1>Empresas</h1>
-                  <p className="subtitle">
-                    Mantenha as convenções e permissões de cada empresa
-                    organizadas.
-                  </p>
-                </div>
-                <button
-                  className="button primary"
-                  onClick={() => edit("empresa")}
-                >
-                  <Plus size={16} />
-                  Nova empresa
-                </button>
-              </div>
-              <section className="panel">
-                {data.companies.length ? (
-                  <div className="table-wrap">
-                    <table>
-                      <thead>
-                        <tr>
-                          <th>Empresa / CNPJ</th>
-                          <th>Localidade</th>
-                          <th>Limite diário</th>
-                          <th>Configurações</th>
-                          <th />
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {data.companies.map((c) => (
-                          <tr key={c.id}>
-                            <td>
-                              <strong>{c.nome}</strong>
-                              <small className="muted">{c.cnpj}</small>
-                            </td>
-                            <td>
-                              {c.cidade} / {c.uf}
-                            </td>
-                            <td>
-                              {c.limite_diario_minutos
-                                ? formatMinutes(c.limite_diario_minutos)
-                                : "Parâmetro legal"}
-                            </td>
-                            <td>
-                              <div className="actions">
-                                <span
-                                  className={`pill ${c.permite_6x1 ? "warn" : ""}`}
-                                >
-                                  {c.permite_6x1 ? "6×1 autorizada" : "Sem 6×1"}
-                                </span>
-                                {c.usa_banco_horas && (
-                                  <span className="pill">Banco de horas</span>
-                                )}
-                              </div>
-                              <small className="muted block mt-2">
-                                {c.cct || "CCT ainda não informada"}
-                              </small>
-                            </td>
-                            <td>
-                              <button
-                                className="button small"
-                                onClick={() => edit("empresa", c)}
-                              >
-                                Editar
-                              </button>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                ) : (
-                  <Empty text="Cadastre a primeira empresa para começar." />
-                )}
-              </section>
-              <div className="banner">
-                <ShieldCheck size={18} />
-                <div>
-                  Limites específicos e autorização de 6×1 devem ter respaldo no
-                  instrumento aplicável. O banco de horas é um cadastro de
-                  permissão: não cancela alertas nem mantém saldo financeiro.
-                </div>
-              </div>
-            </>
+            <CompanyDirectory
+              data={data}
+              month={month}
+              onCreate={() => edit("empresa")}
+              onOpen={openCompany}
+              onEdit={(c) => edit("empresa", c)}
+            />
           )}
           {page === "funcionarios" && (
-            <>
-              <div className="page-head">
-                <div>
-                  <div className="eyebrow">PESSOAS E CONTRATOS</div>
-                  <h1>Funcionários</h1>
-                  <p className="subtitle">
-                    Cadastros essenciais para planejar jornadas. Não coletamos
-                    CPF.
-                  </p>
-                </div>
-                <button
-                  className="button primary"
-                  disabled={!data.companies.length}
-                  onClick={() => edit("funcionario")}
-                >
-                  <Plus size={16} />
-                  Novo funcionário
-                </button>
-              </div>
-              <section className="panel">
-                {data.employees.length ? (
-                  <div className="table-wrap">
-                    <table>
-                      <thead>
-                        <tr>
-                          <th>Nome / cargo</th>
-                          <th>Empresa</th>
-                          <th>Horário contratual</th>
-                          <th>Descansos contratuais</th>
-                          <th />
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {data.employees.map((e) => (
-                          <tr key={e.id}>
-                            <td>
-                              <strong>{e.nome}</strong>
-                              <small className="muted">{e.cargo}</small>
-                            </td>
-                            <td>
-                              {
-                                data.companies.find(
-                                  (c) => c.id === e.empresa_id,
-                                )?.nome
-                              }
-                            </td>
-                            <td>
-                              {e.carga_semanal_minutos
-                                ? `${formatMinutes(e.carga_semanal_minutos)} / semana`
-                                : "Carga pendente de revisão"}
-                              <small className="muted">
-                                {e.horario_contratual ||
-                                  "Sem observações contratuais"}
-                              </small>
-                            </td>
-                            <td>
-                              {e.dias_descanso
-                                .map((d) => dayNames[d].slice(0, 3))
-                                .join(", ")}
-                            </td>
-                            <td>
-                              <button
-                                className="button small"
-                                onClick={() => edit("funcionario", e)}
-                              >
-                                Editar
-                              </button>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                ) : (
-                  <Empty
-                    text={
-                      data.companies.length
-                        ? "Nenhum funcionário cadastrado."
-                        : "Cadastre uma empresa antes de adicionar funcionários."
-                    }
-                  />
-                )}
-              </section>
-              <div className="banner neutral">
-                <BookOpen size={17} />
-                <span>
-                  Os descansos contratuais ficam registrados no cadastro. O
-                  gerador segue os dias do modelo selecionado; confira se o
-                  modelo corresponde ao contrato antes de salvar.
-                </span>
-              </div>
-            </>
+            <EmployeeDirectory
+              data={data}
+              companyId={companyScopeId ?? undefined}
+              month={month}
+              onEdit={(e) => edit("funcionario", e)}
+              onOpen={openEmployee}
+              onSchedules={employeeSchedules}
+              onToggleStatus={toggleEmployeeStatus}
+            />
+          )}
+          {page === "employee-detail" && detailEmployee && scopedCompany && (
+            <EmployeeDetails
+              employee={detailEmployee}
+              company={scopedCompany}
+              data={{ ...data, logs: scopedData.logs }}
+              month={month}
+              onEdit={(e) => edit("funcionario", e)}
+              onSchedules={employeeSchedules}
+              onClose={() => setPage("funcionarios")}
+            />
           )}
           {page === "modelos" && (
             <>
@@ -2199,7 +2560,7 @@ export default function Workspace() {
                 </button>
               </div>
               <div className="grid2">
-                {data.models.map((m) => (
+                {scopedData.models.map((m) => (
                   <section className="panel" key={m.id}>
                     <div className="panel-head">
                       <h2>{m.nome}</h2>
@@ -2220,7 +2581,9 @@ export default function Workspace() {
                           className="button small"
                           onClick={() => edit("modelo", m)}
                         >
-                          Editar modelo
+                          {companyScopeId && !m.empresa_id
+                            ? "Personalizar nesta empresa"
+                            : "Editar modelo"}
                         </button>
                         <button
                           className="button small"
@@ -2241,7 +2604,7 @@ export default function Workspace() {
                   </section>
                 ))}
               </div>
-              {!data.models.length && (
+              {!scopedData.models.length && (
                 <section className="panel">
                   <Empty text="Crie um modelo ou importe os modelos iniciais em Parâmetros legais." />
                 </section>
@@ -2259,6 +2622,23 @@ export default function Workspace() {
           )}
           {page === "feriados" && (
             <>
+              {scopedCompany && (
+                <div className="banner neutral">
+                  <Flag size={18} />
+                  <div>
+                    Este calendário mostra as datas oficiais aplicáveis a{" "}
+                    {scopedCompany.nome}. A edição da data legal é
+                    compartilhada; o funcionamento por empresa será configurado
+                    em etapa própria.
+                    <button
+                      className="button small"
+                      onClick={() => navigate("feriados")}
+                    >
+                      Gerenciar calendário global
+                    </button>
+                  </div>
+                </div>
+              )}
               <div className="page-head">
                 <div>
                   <div className="eyebrow">CALENDÁRIO DE DESCANSO</div>
@@ -2271,7 +2651,7 @@ export default function Workspace() {
                 <div className="actions">
                   <button
                     className="button"
-                    disabled={busy}
+                    disabled={busy || !!companyScopeId}
                     onClick={() =>
                       perform(async () => {
                         const year = Number(month.slice(0, 4));
@@ -2305,6 +2685,7 @@ export default function Workspace() {
                   </button>
                   <button
                     className="button primary"
+                    disabled={!!companyScopeId}
                     onClick={() => edit("feriado")}
                   >
                     <Plus size={16} />
@@ -2321,7 +2702,7 @@ export default function Workspace() {
                 </span>
               </div>
               <section className="panel">
-                {data.holidays.length ? (
+                {scopedData.holidays.length ? (
                   <div className="table-wrap">
                     <table>
                       <thead>
@@ -2334,7 +2715,7 @@ export default function Workspace() {
                         </tr>
                       </thead>
                       <tbody>
-                        {[...data.holidays]
+                        {[...scopedData.holidays]
                           .sort((a, b) => a.data.localeCompare(b.data))
                           .map((h) => (
                             <tr key={h.id}>
@@ -2352,6 +2733,7 @@ export default function Workspace() {
                               <td>
                                 <button
                                   className="button small"
+                                  disabled={!!companyScopeId}
                                   onClick={() => edit("feriado", h)}
                                 >
                                   Editar
@@ -2490,72 +2872,16 @@ export default function Workspace() {
             </>
           )}
           {page === "historico" && (
-            <>
-              <div className="page-head">
-                <div>
-                  <div className="eyebrow">RASTREABILIDADE</div>
-                  <h1>Histórico de alterações</h1>
-                  <p className="subtitle">
-                    Últimos 100 registros de alterações da sua conta, gerados
-                    pelo banco.
-                  </p>
-                </div>
-                <button
-                  className="button"
-                  disabled={busy}
-                  onClick={() => perform(refresh)}
-                >
-                  <RefreshCw size={14} />
-                  Atualizar
-                </button>
-              </div>
-              <section className="panel">
-                {data.logs.length ? (
-                  <div className="table-wrap">
-                    <table>
-                      <thead>
-                        <tr>
-                          <th>Data e hora</th>
-                          <th>Cadastro</th>
-                          <th>Ação</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {data.logs.map((l) => (
-                          <tr key={l.id}>
-                            <td>
-                              {new Date(l.alterado_em).toLocaleString("pt-BR", {
-                                timeZone: "America/Sao_Paulo",
-                              })}
-                            </td>
-                            <td>{l.tabela.replaceAll("_", " ")}</td>
-                            <td>
-                              <span className="pill">
-                                {(
-                                  {
-                                    INSERT: "Inclusão",
-                                    UPDATE: "Alteração",
-                                    DELETE: "Exclusão",
-                                  } as Record<string, string>
-                                )[l.acao] ?? l.acao}
-                              </span>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                ) : (
-                  <Empty
-                    text={
-                      demo
-                        ? "O histórico do banco não é simulado na demonstração."
-                        : "Nenhuma alteração registrada ainda."
-                    }
-                  />
-                )}
-              </section>
-            </>
+            <AuditHistory
+              logs={scopedData.logs}
+              companies={data.companies}
+              userId={user?.id}
+              demo={demo}
+              loading={!demo && !!companyScopeId && companyAudit.loading}
+              error={!demo && !!companyScopeId ? companyAudit.error : undefined}
+              hasMore={!demo && !!companyScopeId && companyAudit.hasMore}
+              onLoadMore={() => void loadMoreHistory()}
+            />
           )}
           <p className="footer-note">
             Gerador de Jornadas · Planejamento para Departamento Pessoal
@@ -2573,166 +2899,30 @@ export default function Workspace() {
           <form onSubmit={formSubmit}>
             <div className="form-grid">
               {modal.kind === "empresa" && (
-                <>
-                  <Field label="Nome da empresa">
-                    <input
-                      name="nome"
-                      required
-                      maxLength={160}
-                      defaultValue={String(modal.row?.nome ?? "")}
-                    />
-                  </Field>
-                  <Field label="CNPJ">
-                    <input
-                      name="cnpj"
-                      required
-                      inputMode="numeric"
-                      maxLength={18}
-                      placeholder="00.000.000/0000-00"
-                      defaultValue={String(modal.row?.cnpj ?? "")}
-                    />
-                  </Field>
-                  <Field label="Cidade">
-                    <input
-                      name="cidade"
-                      required
-                      maxLength={100}
-                      defaultValue={String(modal.row?.cidade ?? "Recife")}
-                    />
-                  </Field>
-                  <Field label="UF">
-                    <input
-                      name="uf"
-                      required
-                      pattern="[A-Za-z]{2}"
-                      maxLength={2}
-                      defaultValue={String(modal.row?.uf ?? "PE")}
-                    />
-                  </Field>
-                  <div className="span2">
-                    <Field label="CCT aplicável e fundamento das permissões">
-                      <textarea
-                        name="cct"
-                        placeholder="Informe o sindicato, a convenção e as cláusulas aplicáveis."
-                        defaultValue={String(modal.row?.cct ?? "")}
-                      />
-                    </Field>
-                  </div>
-                  <Field label="Limite diário permitido (horas decimais, opcional)">
-                    <input
-                      name="limite"
-                      type="number"
-                      min="0.01"
-                      max="24"
-                      step="0.01"
-                      placeholder="Ex.: 8,4 para 8h24"
-                      defaultValue={
-                        modal.row?.limite_diario_minutos
-                          ? Number(modal.row.limite_diario_minutos) / 60
-                          : ""
-                      }
-                    />
-                  </Field>
-                  <p className="warning-text self-end">
-                    Em branco: segue o parâmetro legal vigente. Um limite
-                    específico exige conferência da CCT.
-                  </p>
-                  <label className="check-label">
-                    <input
-                      name="permite_6x1"
-                      type="checkbox"
-                      defaultChecked={Boolean(modal.row?.permite_6x1)}
-                    />
-                    Permite escala 6×1 pela CCT
-                  </label>
-                  <label className="check-label">
-                    <input
-                      name="banco"
-                      type="checkbox"
-                      defaultChecked={Boolean(modal.row?.usa_banco_horas)}
-                    />
-                    Usa banco de horas
-                  </label>
-                </>
+                <CompanyFields
+                  company={modal.row as unknown as Company | undefined}
+                  models={data.models}
+                />
               )}
               {modal.kind === "funcionario" && (
-                <>
-                  <Field label="Empresa">
-                    <select
-                      name="empresa_id"
-                      required
-                      defaultValue={String(modal.row?.empresa_id ?? companyId)}
-                    >
-                      {data.companies.map((c) => (
-                        <option key={c.id} value={c.id}>
-                          {c.nome}
-                        </option>
-                      ))}
-                    </select>
-                  </Field>
-                  <Field label="Nome do funcionário">
-                    <input
-                      name="nome"
-                      required
-                      maxLength={160}
-                      defaultValue={String(modal.row?.nome ?? "")}
-                    />
-                  </Field>
-                  <Field label="Cargo">
-                    <input
-                      name="cargo"
-                      maxLength={120}
-                      defaultValue={String(modal.row?.cargo ?? "")}
-                    />
-                  </Field>
-                  <Field label="Carga semanal contratual (horas)">
-                    <input
-                      name="carga_semanal"
-                      type="number"
-                      min={1 / 60}
-                      max="168"
-                      step="any"
-                      placeholder="Ex.: 30 ou 30,5"
-                      defaultValue={
-                        typeof modal.row?.carga_semanal_minutos === "number"
-                          ? modal.row.carga_semanal_minutos / 60
-                          : ""
-                      }
-                    />
-                    <small className="muted">
-                      Deixe vazio se depender de revisão. 30,5 horas = 30h30.
-                      Não autoriza exceções legais.
-                    </small>
-                  </Field>
-                  <Field label="Horário contratual / observações">
-                    <input
-                      name="horario"
-                      placeholder="Ex.: 42h semanais, seg a sex"
-                      defaultValue={String(modal.row?.horario_contratual ?? "")}
-                    />
-                  </Field>
-                  <div className="span2">
-                    <label>Dias de descanso contratuais</label>
-                    <div className="actions mt-3">
-                      {dayNames.map((n, i) => (
-                        <label key={i} className="check-label">
-                          <input
-                            type="checkbox"
-                            name="descanso"
-                            value={i}
-                            defaultChecked={(
-                              (modal.row?.dias_descanso ?? [0, 6]) as number[]
-                            ).includes(i)}
-                          />
-                          {n.slice(0, 3)}
-                        </label>
-                      ))}
-                    </div>
-                  </div>
-                </>
+                <EmployeeFields
+                  employee={modal.row as unknown as Employee | undefined}
+                  companies={data.companies}
+                  models={data.models}
+                  companyId={companyScopeId ?? undefined}
+                />
               )}
               {modal.kind === "modelo" && (
                 <>
+                  {(companyScopeId || modal.row?.id) && (
+                    <input
+                      type="hidden"
+                      name="empresa_id"
+                      value={
+                        companyScopeId ?? String(modal.row?.empresa_id ?? "")
+                      }
+                    />
+                  )}
                   <Field label="Nome do modelo">
                     <input
                       name="nome"
@@ -2756,6 +2946,7 @@ export default function Workspace() {
                     <Field label="Disponível para">
                       <select
                         name="empresa_id"
+                        disabled={!!companyScopeId || !!modal.row?.id}
                         defaultValue={String(modal.row?.empresa_id ?? "")}
                       >
                         <option value="">Todas as minhas empresas</option>
@@ -3014,6 +3205,26 @@ export default function Workspace() {
               </button>
             </div>
           </form>
+        </Dialog>
+      )}
+      {confirmation && (
+        <Dialog title={confirmation.title} close={() => setConfirmation(null)}>
+          <p className="subtitle !mt-0">{confirmation.message}</p>
+          <div className="dialog-actions">
+            <button className="button" onClick={() => setConfirmation(null)}>
+              Cancelar
+            </button>
+            <button
+              className="button primary"
+              onClick={() => {
+                const action = confirmation.accept;
+                setConfirmation(null);
+                action();
+              }}
+            >
+              Confirmar
+            </button>
+          </div>
         </Dialog>
       )}
       {toast && (

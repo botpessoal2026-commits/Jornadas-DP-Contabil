@@ -48,7 +48,7 @@ test("demonstração: calendário, edições, exportações, duplicação e cada
     page.getByRole("heading", { name: "janeiro de 2027", exact: true }),
   ).toBeVisible();
   await page.getByRole("button", { name: "Empresas", exact: true }).click();
-  await page.getByRole("button", { name: "Nova empresa" }).click();
+  await page.getByRole("button", { name: "Cadastrar nova empresa" }).click();
   await page
     .getByRole("textbox", { name: "Nome da empresa" })
     .fill("Empresa de teste");
@@ -57,7 +57,7 @@ test("demonstração: calendário, edições, exportações, duplicação e cada
     .fill("04.252.011/0001-10");
   await page.getByRole("button", { name: "Salvar cadastro" }).click();
   await expect(
-    page.getByText("Empresa de teste", { exact: true }),
+    page.getByRole("heading", { name: "Empresa de teste", exact: true }),
   ).toBeVisible();
   await page
     .getByRole("button", { name: "Parâmetros legais", exact: true })
@@ -105,21 +105,27 @@ test("carga contratual editável reabre e gera alertas sem substituir observaç�
   await page.goto("/");
   await page.getByRole("button", { name: "Explorar demonstração" }).click();
   await page.getByRole("button", { name: "Funcionários", exact: true }).click();
-  const row = page.getByRole("row").filter({ hasText: "Mariana Costa" });
-  await row.getByRole("button", { name: "Editar", exact: true }).click();
+  const row = page
+    .locator(".employee-card")
+    .filter({ hasText: "Mariana Costa" });
+  await row
+    .getByRole("button", { name: "Editar funcionário", exact: true })
+    .click();
   await page
     .getByRole("spinbutton", { name: "Carga semanal contratual (horas)" })
     .fill("30");
   await page
     .getByRole("button", { name: "Salvar cadastro", exact: true })
     .click();
-  await expect(
-    row.getByRole("cell").filter({ hasText: "30h00 / semana" }),
-  ).toBeVisible();
+  await expect(row.getByText("Carga contratual:").locator("..")).toContainText(
+    "30h00 / semana",
+  );
   await expect(
     row.getByText("42 horas semanais", { exact: true }),
   ).toBeVisible();
-  await row.getByRole("button", { name: "Editar", exact: true }).click();
+  await row
+    .getByRole("button", { name: "Editar funcionário", exact: true })
+    .click();
   await expect(
     page.getByRole("spinbutton", { name: "Carga semanal contratual (horas)" }),
   ).toHaveValue("30");
