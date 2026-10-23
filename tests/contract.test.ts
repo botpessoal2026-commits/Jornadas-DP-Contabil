@@ -147,3 +147,40 @@ test("CSV usa a mesma carga estruturada da tela", () => {
   assert.equal(rows.length, 31);
   assert.ok(rows.every((r) => r["Carga contratual semanal"] === "30h30"));
 });
+
+test("conferência respeita carga diária e descanso específicos do vínculo", () => {
+  const d = demoData();
+  const employee = {
+    ...d.employees[0],
+    carga_diaria_minutos: 360,
+    dias_descanso: [0, 2, 6],
+  };
+  const report = evaluate(
+    d.schedules[0].dias,
+    d.rules,
+    d.companies[0],
+    "2026-12",
+    "5x2",
+    employee,
+  );
+  assert.ok(
+    report.alerts.some(
+      (alert) =>
+        alert.code === "contrato_diario" &&
+        alert.date === "2026-12-01" &&
+        alert.severity === "erro",
+    ),
+  );
+  assert.ok(
+    report.alerts.some(
+      (alert) =>
+        alert.code === "descanso_contratual" && alert.date === "2026-12-01",
+    ),
+  );
+  assert.ok(
+    !report.alerts.some(
+      (alert) =>
+        alert.code === "descanso_contratual" && alert.date === "2026-12-02",
+    ),
+  );
+});

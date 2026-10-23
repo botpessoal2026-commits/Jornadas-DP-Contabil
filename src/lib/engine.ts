@@ -267,6 +267,33 @@ export function evaluate(
       computeDay(day, rules, ordered).computed,
       computeDay(day, rules).computed,
     );
+    if (
+      employee?.carga_diaria_minutos &&
+      worked > employee.carga_diaria_minutos + 0.001
+    )
+      alerts.push({
+        date: day.data,
+        code: "contrato_diario",
+        severity: "erro",
+        message: `${employee.nome}: ${formatMinutes(worked)} supera a carga diária contratual de ${formatMinutes(employee.carga_diaria_minutos)}. Revise o contrato e os horários; o modelo não autoriza a diferença.`,
+        rule: "Carga diária contratual",
+        source:
+          "Cadastro estruturado do funcionário; conferir contrato e CCT/ACT.",
+      });
+    if (
+      employee &&
+      employee.dias_descanso.includes(dateUTC(day.data).getUTCDay()) &&
+      worked > 0
+    )
+      alerts.push({
+        date: day.data,
+        code: "descanso_contratual",
+        severity: "aviso",
+        message: `${employee.nome}: há trabalho planejado em dia de descanso contratual. Revise a jornada ou documente a exceção aplicável.`,
+        rule: "Descanso contratual",
+        source:
+          "Dias de descanso cadastrados no vínculo; conferir contrato e CCT/ACT.",
+      });
     const daily =
       regime.valor.permite_limite_empresa === false
         ? numberValue(regime, "limite_diario_minutos")
