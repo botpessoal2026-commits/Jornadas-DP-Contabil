@@ -33,6 +33,7 @@ export type Employee = {
   id: string;
   empresa_id: string;
   nome: string;
+  cpf?: string | null;
   cargo: string;
   horario_contratual: string;
   carga_semanal_minutos?: number | null;

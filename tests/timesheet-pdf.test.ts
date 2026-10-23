@@ -16,6 +16,21 @@ function workHoursHeaders(doc: TimesheetPdf) {
     page.filter((command) => command.includes("Horário de trabalho:")),
   );
 }
+function assertRemovedNotes(doc: TimesheetPdf) {
+  for (const page of pageCommands(doc)) {
+    const text = page
+      .flatMap((command) =>
+        Array.from(command.matchAll(/\((.*?)\) Tj/g), (match) => match[1]),
+      )
+      .join(" ");
+    assert.ok(!text.includes("Horário de trabalho no cabeçalho é referência"));
+    assert.ok(!text.includes("Preencha as marcações efetivamente realizadas"));
+    assert.ok(!text.includes("Linhas escuras e riscadas"));
+    assert.ok(
+      !text.includes("Feriado com trabalho: destaque e marcações disponíveis"),
+    );
+  }
+}
 function assertManualColumns(table: Table) {
   assert.equal(table.columns.length, 9);
   assert.ok(
@@ -59,9 +74,68 @@ test("folha A4 mantém 31 dias e marcações livres, com horários somente no ca
   assert.ok(doc.output().startsWith("%PDF-"));
   assert.ok(doc.output().includes("Mariana Costa"));
   assert.ok(doc.output().includes("Aurora Contabilidade"));
+  assert.ok(
+    pageCommands(doc)[0].some((command) =>
+      command.includes("Cont Contábil · Gerador de Jornadas"),
+    ),
+  );
+  assert.ok(
+    pageCommands(doc)[0].some((command) => command.includes("Página 1/1")),
+  );
   const headers = workHoursHeaders(doc);
   assert.equal(headers.length, 1);
   assert.ok(headers[0].includes("08:00 às 12:00 | 13:00 às 17:24"));
+  assertRemovedNotes(doc);
+  const header = headers[0];
+  const firstBaseline = Number(header.match(/([\d.]+) Td/)![1]);
+  const lineHeight = Number(header.match(/([\d.]+) TL/)![1]);
+  const lines = Array.from(header.matchAll(/\) Tj/g)).length;
+  const lastBaseline =
+    doc.internal.pageSize.getHeight() -
+    (firstBaseline - (lines - 1) * lineHeight) / doc.internal.scaleFactor;
+  const gap = table.head[0].cells[0].y - lastBaseline;
+  assert.ok(
+    gap > 3 && gap < 8,
+    "a tabela segue o cabeçalho sem lacuna do aviso",
+  );
+});
+
+test("CPF do funcionário usa a máscara brasileira e fica entre nome e cargo", async () => {
+  const data = demoData();
+  for (const [cpf, expected] of [
+    ["12345678909", "123.456.789-09"],
+    ["987.654.321-00", "987.654.321-00"],
+  ]) {
+    const doc = await timesheetDocument(data.schedules[0], data.companies[0], {
+      ...data.employees[0],
+      cpf,
+    });
+    const header = workHoursHeaders(doc)[0];
+    assert.ok(
+      header.includes(
+        `(Funcionário: Mariana Costa) Tj\nT* (CPF: ${expected}) Tj\nT* (Cargo:`,
+      ),
+    );
+    assert.ok(header.includes("/F1 8 Tf"));
+    assertRemovedNotes(doc);
+    assertManualColumns(tableOf(doc));
+  }
+});
+
+test("CPF ausente mantém a identificação e a geração sem erros", async () => {
+  const data = demoData();
+  for (const cpf of [undefined, null, "", "   "]) {
+    const doc = await timesheetDocument(data.schedules[0], data.companies[0], {
+      ...data.employees[0],
+      cpf,
+    });
+    const header = workHoursHeaders(doc)[0];
+    assert.ok(header.includes("(CPF: Não informado) Tj\nT* (Cargo:"));
+    assert.ok(header.includes("08:00 às 12:00 | 13:00 às 17:24"));
+    assert.equal(doc.getNumberOfPages(), 1);
+    assert.ok(doc.output().startsWith("%PDF-"));
+    assertManualColumns(tableOf(doc));
+  }
 });
 
 test("assinatura única do funcionário fica centralizada entre a tabela e o rodapé", async () => {
@@ -173,6 +247,7 @@ test("folha repete identificação e horários e preserva textos longos e perío
   const employee = {
     ...data.employees[0],
     nome: "Pessoa com nome demonstrativo extenso ".repeat(3) + "FIM-DO-NOME",
+    cpf: "12345678909",
   };
   const doc = await timesheetDocument(schedule, company, employee, {
     preview: true,
@@ -186,7 +261,9 @@ test("folha repete identificação e horários e preserva textos longos e perío
   for (const page of pageCommands(doc)) {
     assert.ok(page.some((command) => command.includes("FIM-DA-EMPRESA")));
     assert.ok(page.some((command) => command.includes("FIM-DO-NOME")));
+    assert.ok(page.some((command) => command.includes("CPF: 123.456.789-09")));
   }
+  assertRemovedNotes(doc);
   assert.equal(workHoursHeaders(doc).length, doc.getNumberOfPages());
   assert.equal(output.match(/Assinatura do funcionário/g)?.length, 1);
   assert.ok(!output.includes("Responsável pela empresa"));
