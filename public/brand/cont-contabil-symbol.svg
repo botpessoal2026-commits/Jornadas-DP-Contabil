@@ -1,0 +1,62 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="640" height="640" viewBox="100 120 640 640">
+<title>Cont Contábil</title>
+      <defs>
+    <linearGradient id="wingMetal" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#91ADC1"/><stop offset="0.48" stop-color="#C1CED8"/><stop offset="1" stop-color="#6287A3"/>
+    </linearGradient>
+    <linearGradient id="ballMetal" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#FFFFFF"/><stop offset="0.45" stop-color="#B9D0DF"/><stop offset="1" stop-color="#6488A6"/>
+    </linearGradient>
+    <linearGradient id="shaftMetal" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#7793AA"/><stop offset="0.40" stop-color="#EAF4FC"/><stop offset="1" stop-color="#8AA9C1"/>
+    </linearGradient>
+    <linearGradient id="ribbonSilver" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#FAFDFF"/><stop offset="0.48" stop-color="#A8C0D2"/><stop offset="1" stop-color="#7898B2"/>
+    </linearGradient>
+    <linearGradient id="ribbonBlue" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0E66BC"/><stop offset="0.42" stop-color="#03A2E6"/><stop offset="0.72" stop-color="#52D3FF"/><stop offset="1" stop-color="#056BAE"/>
+    </linearGradient>
+    
+    <linearGradient id="line" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#18C0F2"/><stop offset="1" stop-color="#067BBC"/>
+    </linearGradient>
+    </defs>
+        <g transform="translate(48 38) scale(1.75)">
+  <g>
+    <!-- sweep wings: four separate feather forms, symmetry around staff -->
+    <g fill="url(#wingMetal)" stroke="#758FA8" stroke-width="1.25" stroke-linejoin="round">
+      <path d="M 203 101 C 173 80 146 66 112 72 C 86 77 63 83 40 78 C 53 92 79 94 111 85 C 143 78 174 94 195 110 Z"/>
+      <path d="M 189 113 C 161 90 139 84 115 92 C 94 100 77 104 58 99 C 73 115 96 115 121 103 C 141 95 157 102 179 124 Z"/>
+      <path d="M 175 123 C 149 105 132 104 116 115 C 100 125 91 128 76 126 C 90 139 110 135 126 121 C 140 113 157 119 168 133 Z"/>
+      <path d="M 160 134 C 144 121 128 124 118 135 C 111 140 105 141 99 139 C 112 151 132 145 146 133 L 155 140 Z"/>
+    </g>
+    <g transform="translate(420 0) scale(-1 1)" fill="url(#wingMetal)" stroke="#758FA8" stroke-width="1.25" stroke-linejoin="round">
+      <path d="M 203 101 C 173 80 146 66 112 72 C 86 77 63 83 40 78 C 53 92 79 94 111 85 C 143 78 174 94 195 110 Z"/>
+      <path d="M 189 113 C 161 90 139 84 115 92 C 94 100 77 104 58 99 C 73 115 96 115 121 103 C 141 95 157 102 179 124 Z"/>
+      <path d="M 175 123 C 149 105 132 104 116 115 C 100 125 91 128 76 126 C 90 139 110 135 126 121 C 140 113 157 119 168 133 Z"/>
+      <path d="M 160 134 C 144 121 128 124 118 135 C 111 140 105 141 99 139 C 112 151 132 145 146 133 L 155 140 Z"/>
+    </g>
+    <!-- fine lines in the feathers -->
+    <g fill="none" stroke="#758FA8" opacity="0.7" stroke-width="1.8" stroke-linecap="round">
+      <path d="M 77 84 C 121 72 160 78 192 105"/>
+      <path d="M 95 107 C 132 88 158 99 174 117"/>
+      <path d="M 100 128 C 122 109 145 113 163 127"/>
+      <path d="M 343 84 C 299 72 260 78 228 105"/>
+      <path d="M 325 107 C 288 88 262 99 246 117"/>
+      <path d="M 320 128 C 298 109 275 113 257 127"/>
+    </g>
+    <!-- ball of the staff -->
+    <circle cx="210" cy="75" r="17" fill="url(#ballMetal)" stroke="#758FA8" stroke-width="2.3"/>
+    <path d="M 203 92 L 203 300 Q 210 312 217 300 L 217 92 Z" fill="url(#shaftMetal)" stroke="#758FA8" stroke-width="1.5"/>
+    <!-- two intertwining ribbons -->
+    <path d="M 195 115 C 151 139 125 170 136 204 C 145 233 187 251 213 277 C 239 301 225 326 210 344 C 199 358 197 372 205 388" fill="none" stroke="#758FA8" stroke-width="22" stroke-linecap="round" stroke-linejoin="round" opacity="0.94"/>
+    <path d="M 195 115 C 151 139 125 170 136 204 C 145 233 187 251 213 277 C 239 301 225 326 210 344 C 199 358 197 372 205 388" fill="none" stroke="url(#ribbonSilver)" stroke-width="17.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M 225 115 C 269 139 295 170 284 204 C 275 233 233 251 207 277 C 181 301 195 326 210 344 C 221 358 223 372 215 388" fill="none" stroke="#758FA8" stroke-width="22" stroke-linecap="round" stroke-linejoin="round" opacity="0.9"/>
+    <path d="M 225 115 C 269 139 295 170 284 204 C 275 233 233 251 207 277 C 181 301 195 326 210 344 C 221 358 223 372 215 388" fill="none" stroke="url(#ribbonBlue)" stroke-width="17.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <!-- central crossing accent in blue, retaining intertwined shape -->
+    <path d="M 243 133 C 253 154 254 177 241 196 C 226 219 202 240 185 254 L 204 273 C 226 255 254 229 266 209 C 282 181 271 150 243 133 Z" fill="url(#ribbonBlue)" stroke="#758FA8" stroke-width="1.8"/>
+    <path d="M 250 147 C 262 175 259 190 246 208" fill="none" stroke="#B8F4FF" stroke-width="3" opacity="0.55" stroke-linecap="round"/>
+  </g>
+  </g>
+</svg>
+

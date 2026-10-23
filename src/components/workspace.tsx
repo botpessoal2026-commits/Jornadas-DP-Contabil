@@ -85,6 +85,7 @@ import DayEditor from "./day-editor";
 import ScheduleAlerts from "./schedule-alerts";
 import { alertsForDate, buildAlertSummary } from "@/lib/alerts";
 import { exportCSV, exportExcel, exportPDF } from "@/lib/exports";
+import Brand from "./brand";
 
 type Page =
   | "inicio"
@@ -1298,16 +1299,9 @@ export default function Workspace() {
     return (
       <div className="login-shell">
         <section className="login-art">
-          <div className="brand">
-            <span className="brand-icon">
-              <CalendarDays size={24} />
-            </span>
-            <div>
-              Gerador de Jornadas<small>DEPARTAMENTO PESSOAL</small>
-            </div>
-          </div>
-          <div>
-            <div className="eyebrow text-[#a8c5a5]">
+          <Brand light className="login-brand" />
+          <div className="login-copy">
+            <div className="eyebrow login-kicker">
               MAIS CLAREZA PARA CADA JORNADA
             </div>
             <h1>
@@ -1315,17 +1309,20 @@ export default function Workspace() {
               <br />
               organizado.
               <br />
-              <span className="text-[#b8d19b]">Pessoas em dia.</span>
+              <span className="login-highlight">Pessoas em dia.</span>
             </h1>
             <p>
               Empresas, pessoas e escalas em um só lugar. Planeje o mês com
               regras transparentes e mais tranquilidade para o seu DP.
             </p>
           </div>
-          <p className="text-xs">Planejamento · Conferência · Organização</p>
+          <p className="login-art-footer">
+            Planejamento · Conferência · Organização
+          </p>
         </section>
         <section className="login-form">
           <div className="login-box">
+            <Brand className="login-mobile-brand" />
             <div className="eyebrow">GERADOR DE JORNADAS</div>
             <h1>
               {authMode === "signup"
@@ -1410,7 +1407,7 @@ export default function Workspace() {
                   : "Esqueci minha senha"}
               </button>
             </div>
-            <div className="mt-7 border-t border-[#dce5dc] pt-6">
+            <div className="login-demo mt-7 border-t pt-6">
               <button
                 className="button w-full"
                 onClick={() => {
@@ -1485,16 +1482,7 @@ export default function Workspace() {
         />
       )}
       <aside className={`sidebar ${mobile ? "open" : ""}`}>
-        <div className="brand">
-          <span className="brand-icon">
-            <CalendarDays size={23} />
-          </span>
-          <div>
-            Gerador
-            <br />
-            de Jornadas<small>DEPARTAMENTO PESSOAL</small>
-          </div>
-        </div>
+        <Brand light />
         <div className="nav-label">ÁREA DE TRABALHO</div>
         {nav.slice(0, 5).map(([id, label, Icon]) => (
           <button
@@ -1531,7 +1519,7 @@ export default function Workspace() {
             <div className="truncate">
               {demo ? "Modo demonstração" : user?.email}
             </div>
-            <small className="text-[#89a99b]">
+            <small className="profile-caption">
               {demo ? "Dados fictícios" : "Área de acesso privado"}
             </small>
           </div>
@@ -1585,7 +1573,8 @@ export default function Workspace() {
               <Menu size={21} />
             </button>
             <span>
-              Área de trabalho <span className="mx-2 text-[#b3c0b4]">/</span>{" "}
+              Área de trabalho{" "}
+              <span className="breadcrumb-divider mx-2">/</span>{" "}
               <strong>
                 {scopedCompany?.nome ?? nav.find((n) => n[0] === page)?.[1]}
               </strong>
@@ -1614,7 +1603,7 @@ export default function Workspace() {
                 ))}
               </select>
             </label>
-            <span className="date-label">Departamento Pessoal</span>
+            <span className="date-label topbar-brand">Cont Contábil</span>
             <span className={`pill ${demo ? "warn" : ""}`}>
               {demo ? "Demonstração" : "Acesso protegido"}
             </span>
@@ -1647,9 +1636,11 @@ export default function Workspace() {
           )}
           {page === "inicio" && (
             <>
-              <div className="page-head">
+              <div className="page-head dashboard-hero">
                 <div>
-                  <div className="eyebrow">ORGANIZAÇÃO QUE FAZ A DIFERENÇA</div>
+                  <div className="eyebrow">
+                    CONT CONTÁBIL · DEPARTAMENTO PESSOAL
+                  </div>
                   <h1>Seu mês, bem planejado.</h1>
                   <p className="subtitle">
                     Um panorama das empresas, pessoas e jornadas do seu
@@ -2339,7 +2330,7 @@ export default function Workspace() {
                                 <span className="holiday">{d.feriado}</span>
                               )}
                               {d.observacao && (
-                                <span className="holiday text-[#52765b]">
+                                <span className="holiday special-day-label">
                                   Com observação
                                 </span>
                               )}
@@ -2349,11 +2340,11 @@ export default function Workspace() {
                     </div>
                     <div className="legend">
                       <span>
-                        <span className="dot !bg-[#7ba477] mr-1" />
+                        <span className="dot work-dot mr-1" />
                         Dia trabalhado
                       </span>
                       <span>
-                        <span className="dot !bg-[#c8d1c0] mr-1" />
+                        <span className="dot rest-dot mr-1" />
                         Folga
                       </span>
                       <span>
@@ -2480,7 +2471,7 @@ export default function Workspace() {
                           </p>
                         )}
                         {model && (
-                          <div className="mt-6 pt-5 border-t border-[#e4eae0]">
+                          <div className="section-divider mt-6 pt-5 border-t">
                             <h3>Texto para o Domínio</h3>
                             <p className="subtitle text-xs">
                               {dominioText(model)}
@@ -2884,7 +2875,7 @@ export default function Workspace() {
             />
           )}
           <p className="footer-note">
-            Gerador de Jornadas · Planejamento para Departamento Pessoal
+            Cont Contábil · Gerador de Jornadas
             <br />
             Confira a legislação vigente e a convenção coletiva antes de aprovar
             as escalas.
@@ -2987,7 +2978,7 @@ export default function Workspace() {
                       </div>
                     ))}
                   </div>
-                  <div className="span2 border-t border-[#e1e9de] pt-4">
+                  <div className="section-divider span2 border-t pt-4">
                     <h3>Somente para ciclo 12×36</h3>
                     <p className="subtitle !text-xs mb-4">
                       O ciclo alterna dia de turno e dia de descanso a partir da

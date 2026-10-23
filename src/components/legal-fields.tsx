@@ -94,7 +94,7 @@ export default function LegalFields({
         </select>
       </label>
       <input type="hidden" name="valor" value={JSON.stringify(values)} />
-      <div className="span2 grid grid-cols-1 sm:grid-cols-2 gap-4 rounded-lg bg-[#f6f9f3] p-4">
+      <div className="span2 grid grid-cols-1 sm:grid-cols-2 gap-4 rounded-lg bg-[#f1f6fc] p-4">
         {groups[group].map((field) =>
           field.boolean ? (
             <label key={field.key} className="check-label">
