@@ -2,6 +2,8 @@ import type { Data } from "./store";
 import type { Company, Employee, Schedule } from "./types";
 import { alertsForDate, buildAlertSummary } from "./alerts";
 import { rulesForCompany } from "./company-resources";
+import { scheduleRegime } from "./work-regime";
+import { validationDays } from "./schedule-context";
 import {
   computeDay,
   evaluate,
@@ -54,11 +56,11 @@ export function teamScheduleRows(
       if (schedule) {
         try {
           const report = evaluate(
-            schedule.dias,
+            validationDays(schedule, data.schedules),
             rules,
             company,
             schedule.mes,
-            schedule.modelo_tipo,
+            scheduleRegime(schedule, data.models),
             employee,
           );
           groups = buildAlertSummary(report.alerts, {

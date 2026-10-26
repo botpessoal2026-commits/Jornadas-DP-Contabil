@@ -1,7 +1,8 @@
 import type { LegalRule, Model, WeekPattern, Holiday } from "./types";
+import { default12x36Values } from "./work-regime";
 // Dados de cadastro editáveis. O motor não importa este arquivo: só consome linhas do banco.
 const proposed =
-  "Hipótese fornecida no pedido. EC nº 141/2026 e vigências NÃO verificadas. Conferir publicação oficial e CCT antes de confirmar.";
+  "Cenário demonstrativo histórico, com data ilustrativa preservada. Consulte a EC nº 141/2026 e o instrumento aplicável; este exemplo não comprova enquadramento jurídico.";
 export const initialRules: Omit<LegalRule, "id">[] = [
   {
     nome: "Regime de referência — 44h",
@@ -70,6 +71,17 @@ export const initialRules: Omit<LegalRule, "id">[] = [
       "Divisor não corresponde ao total efetivamente trabalhado no calendário.",
     confirmado: false,
   },
+  {
+    nome: "Regime 12×36 — referência do art. 59-A",
+    chave: "regime",
+    valor: { ...default12x36Values },
+    inicio_vigencia: "2017-11-11",
+    fonte:
+      "CLT, art. 59-A — https://www.planalto.gov.br/ccivil_03/decreto-lei/del5452compilado.htm; EC 141/2026 — https://www.planalto.gov.br/ccivil_03/constituicao/emendas/emc/emc141.htm",
+    observacao:
+      "Referência para conferência. Registre o acordo individual escrito, CCT ou ACT e sua comprovação. Adeque a média e os repousos às vigências de 16/12/2026 e 16/12/2027; esta referência não comprova o instrumento aplicável.",
+    confirmado: false,
+  },
 ];
 // Hipóteses visuais e fixtures de teste; nunca importadas para o banco real.
 export const demonstrationRules: Omit<LegalRule, "id">[] = [
@@ -85,10 +97,10 @@ export const demonstrationRules: Omit<LegalRule, "id">[] = [
     },
     inicio_vigencia: "2026-12-15",
     fonte:
-      "Informação do solicitante — publicação oficial ainda não verificada.",
+      "Exemplo histórico do solicitante; conferir EC nº 141/2026 — https://www.planalto.gov.br/ccivil_03/constituicao/emendas/emc/emc141.htm",
     observacao:
       proposed +
-      " Há divergência entre 15 e 16/12. 8h24 exige limite diário e CCT compatíveis.",
+      " O exemplo mantém 15/12; a vigência oficial é 16/12/2026. 8h24 exige configuração e instrumento compatíveis.",
     confirmado: false,
   },
   {
@@ -102,10 +114,11 @@ export const demonstrationRules: Omit<LegalRule, "id">[] = [
       preferir_domingo: true,
     },
     inicio_vigencia: "2027-12-01",
-    fonte: "Informação do solicitante — data estimada, não confirmada.",
+    fonte:
+      "Exemplo histórico do solicitante; conferir EC nº 141/2026 — https://www.planalto.gov.br/ccivil_03/constituicao/emendas/emc/emc141.htm",
     observacao:
       proposed +
-      " 01/12/2027 é apenas uma referência editável, não uma data legal validada.",
+      " O exemplo mantém 01/12/2027; a vigência oficial de 40h é 16/12/2027.",
     confirmado: false,
   },
 ];

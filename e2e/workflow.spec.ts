@@ -66,7 +66,7 @@ test("demonstração: calendário, edições, exportações, duplicação e cada
     .getByRole("button", { name: "Parâmetros legais", exact: true })
     .click();
   await expect(
-    page.getByText("Vigências propostas, não validadas.", { exact: true }),
+    page.getByText("Confira a aplicabilidade dos parâmetros.", { exact: true }),
   ).toBeVisible();
   const proposed = page.locator(".legal-card").filter({
     has: page.getByRole("heading", {

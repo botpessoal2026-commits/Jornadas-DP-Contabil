@@ -74,6 +74,8 @@ import type {
   WeekPattern,
 } from "@/lib/types";
 import { contractMinutesFromHours } from "@/lib/contract";
+import { scheduleRegime, validateRegimeValues } from "@/lib/work-regime";
+import { validationDays } from "@/lib/schedule-context";
 import { normalizeCpf } from "@/lib/cpf";
 import { demoData } from "@/lib/demo";
 import LegalFields from "./legal-fields";
@@ -600,11 +602,11 @@ export default function Workspace() {
     try {
       return {
         value: evaluate(
-          schedule.dias,
+          validationDays(schedule, data.schedules),
           data.rules,
           company,
           schedule.mes,
-          schedule.modelo_tipo,
+          scheduleRegime(schedule, data.models),
           data.employees.find((e) => e.id === schedule.funcionario_id),
         ),
         error: null,
@@ -618,7 +620,14 @@ export default function Workspace() {
             : "Confira os horários registrados.",
       };
     }
-  }, [schedule, company, data.rules, data.employees]);
+  }, [
+    schedule,
+    company,
+    data.rules,
+    data.employees,
+    data.models,
+    data.schedules,
+  ]);
   const report = calculation.value;
   const alertContext = {
     companyId: company?.id ?? "",
@@ -636,13 +645,19 @@ export default function Workspace() {
       !calculation.error &&
       modal?.kind === "dia"
         ? evaluate(
-            schedule.dias.map((day) =>
-              day.data === editedDay.data ? editedDay : day,
+            validationDays(
+              {
+                ...schedule,
+                dias: schedule.dias.map((day) =>
+                  day.data === editedDay.data ? editedDay : day,
+                ),
+              },
+              data.schedules,
             ),
             data.rules,
             company,
             schedule.mes,
-            schedule.modelo_tipo,
+            scheduleRegime(schedule, data.models),
             data.employees.find((e) => e.id === schedule.funcionario_id),
           )
         : null,
@@ -654,6 +669,8 @@ export default function Workspace() {
       modal?.kind,
       data.rules,
       data.employees,
+      data.models,
+      data.schedules,
     ],
   );
   const editedSummary = buildAlertSummary(
@@ -941,20 +958,9 @@ export default function Workspace() {
     return { ...copy, id };
   }
   function withNeighbors(s: Schedule): Schedule {
-    const actual = new Map<string, Day>();
-    for (const other of data.schedules) {
-      if (other.funcionario_id !== s.funcionario_id || other.mes === s.mes)
-        continue;
-      for (const d of other.dias)
-        if (d.data.startsWith(other.mes.slice(0, 7))) actual.set(d.data, d);
-    }
     return {
       ...s,
-      dias: s.dias.map((d) =>
-        !d.data.startsWith(s.mes.slice(0, 7)) && actual.has(d.data)
-          ? structuredClone(actual.get(d.data)!)
-          : d,
-      ),
+      dias: validationDays(s, data.schedules),
     };
   }
   function createSchedule(
@@ -1271,9 +1277,14 @@ export default function Workspace() {
             : ((modal.row?.turno ?? []) as Shift[]);
         if (tipo === "12x36" && (!pick(fd, "ciclo_inicio") || !turno.length))
           throw new Error("O ciclo 12x36 precisa de data inicial e turno.");
-        if (tipo === "12x36" && minutes(turno) > 720)
+        if (
+          tipo === "12x36" &&
+          Math.max(...turno.map((shift) => span(shift)[1])) -
+            Math.min(...turno.map((shift) => span(shift)[0])) >
+            720
+        )
           throw new Error(
-            "O turno 12x36 não pode exceder 12 horas de relógio.",
+            "O plantão 12×36, incluindo as pausas, não pode exceder 12 horas de relógio.",
           );
         await rowSave(
           "modelos_jornada",
@@ -1341,7 +1352,13 @@ export default function Workspace() {
           ],
           divisor: ["fator"],
         };
-        if (required[chave].some((k) => typeof value[k] !== "number"))
+        if (chave === "regime") validateRegimeValues(value);
+        else if (!required[chave])
+          throw new Error("Grupo de parâmetro inválido.");
+        if (
+          chave !== "regime" &&
+          required[chave].some((k) => typeof value[k] !== "number")
+        )
           throw new Error(
             `Campos numéricos obrigatórios: ${required[chave].join(", ")}`,
           );
@@ -2588,7 +2605,7 @@ export default function Workspace() {
                                 perform(async () => {
                                   if (company)
                                     await exportPDF(
-                                      schedule,
+                                      withNeighbors(schedule),
                                       scheduleRules,
                                       company,
                                       employee,
@@ -2625,7 +2642,7 @@ export default function Workspace() {
                                 perform(async () => {
                                   if (company)
                                     await exportExcel(
-                                      schedule,
+                                      withNeighbors(schedule),
                                       scheduleRules,
                                       company,
                                       data.employees.find(
@@ -2915,16 +2932,65 @@ export default function Workspace() {
                       <div className="grid2">
                         <section className="panel">
                           <div className="panel-head">
-                            <h2>Conferência semanal</h2>
+                            <h2>
+                              {schedule.modelo_tipo === "12x36"
+                                ? "Conferência do ciclo 12×36"
+                                : "Conferência semanal"}
+                            </h2>
                             <span className="pill">SEG A DOM</span>
                           </div>
+                          {schedule.modelo_tipo === "12x36" && (
+                            <div className="panel-body">
+                              <p className="subtitle !mt-0">
+                                A carga é conferida pela média dos ciclos, pelo
+                                limite de cada plantão e pelas 36 horas de
+                                descanso. A semana com quatro plantões não
+                                recebe o teto diário ou semanal das jornadas
+                                comuns.
+                              </p>
+                              {report && report.cycles.length > 0 && (
+                                <p>
+                                  Média indicativa em 14 dias:{" "}
+                                  {formatMinutes(
+                                    Math.min(
+                                      ...report.cycles.map(
+                                        (cycle) => cycle.average,
+                                      ),
+                                    ),
+                                  )}
+                                  {Math.min(
+                                    ...report.cycles.map(
+                                      (cycle) => cycle.average,
+                                    ),
+                                  ) !==
+                                  Math.max(
+                                    ...report.cycles.map(
+                                      (cycle) => cycle.average,
+                                    ),
+                                  )
+                                    ? ` a ${formatMinutes(Math.max(...report.cycles.map((cycle) => cycle.average)))}`
+                                    : ""}{" "}
+                                  por semana. O instrumento aplicável deve
+                                  definir a compensação e o período de apuração.
+                                </p>
+                              )}
+                            </div>
+                          )}
                           <div className="table-wrap">
                             <table>
                               <thead>
                                 <tr>
                                   <th>Semana</th>
-                                  <th>Horas / teto</th>
-                                  <th>Descansos</th>
+                                  <th>
+                                    {schedule.modelo_tipo === "12x36"
+                                      ? "Horas na semana"
+                                      : "Horas / teto"}
+                                  </th>
+                                  <th>
+                                    {schedule.modelo_tipo === "12x36"
+                                      ? "Repousos de 24h"
+                                      : "Descansos"}
+                                  </th>
                                 </tr>
                               </thead>
                               <tbody>
@@ -3194,8 +3260,8 @@ export default function Workspace() {
                 <div>
                   42h em cinco dias equivale a 8h24 por dia. Essa distribuição,
                   o modelo com 10h e o ciclo 12×36 precisam ser compatíveis com
-                  os limites e a CCT da empresa; o modelo não autoriza exceções
-                  por si só.
+                  os limites e o instrumento aplicável; o modelo não autoriza
+                  exceções por si só.
                 </div>
               </div>
             </>
@@ -3376,12 +3442,12 @@ export default function Workspace() {
               <div className="banner">
                 <AlertTriangle size={19} />
                 <div>
-                  <strong>Vigências propostas, não validadas.</strong>
-                  <br />
-                  Não foi confirmada a premissa da EC nº 141/2026. As fases de
-                  42h e 40h são hipóteses fornecidas no pedido. Confira o ato
-                  oficial, a data de corte (15 ou 16/12) e a CCT. Não aprove uma
-                  escala com base apenas nesses exemplos.
+                  <strong>Confira a aplicabilidade dos parâmetros.</strong>
+                  <br />A EC nº 141/2026 prevê 42h e dois repousos a partir de
+                  16/12/2026 e 40h a partir de 16/12/2027. As regras cadastradas
+                  e os exemplos antigos não são atualizados automaticamente.
+                  Confira vigência, enquadramento e instrumento aplicável antes
+                  de confirmar uma regra.
                 </div>
               </div>
               <section className="panel">
@@ -3400,6 +3466,10 @@ export default function Workspace() {
                             <p className="subtitle !mt-1 !text-[11px]">
                               Vigência a partir de{" "}
                               {dateLabel(r.inicio_vigencia)} · {r.chave}
+                              {r.chave === "regime" &&
+                                (r.valor.tipo_regime === "12x36"
+                                  ? " · 12×36"
+                                  : " · Jornada comum")}
                             </p>
                           </div>
                           <div className="actions">
