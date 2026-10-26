@@ -101,6 +101,10 @@ function RuleCard({
           <p className="subtitle !mt-1 !text-[11px]">
             Vigência a partir de {dateLabel(rule.inicio_vigencia)} ·{" "}
             {rule.chave}
+            {rule.chave === "regime" &&
+              (rule.valor.tipo_regime === "12x36"
+                ? " · 12×36"
+                : " · Jornada comum")}
           </p>
           <p className="muted">
             {general ? "Parâmetro geral" : "Próprio desta empresa"}
@@ -421,10 +425,10 @@ export function CompanyResources({
         </div>
         <div className="panel-body">
           <p className="subtitle">
-            Para cada grupo, a regra própria passa a valer desde sua primeira
-            vigência; antes dela permanecem as referências gerais aplicáveis.
-            Personalizar cria uma cópia nesta empresa para conferência,
-            preservando os valores e as fontes originais.
+            Para cada grupo e tipo de regime, a regra própria passa a valer
+            desde sua primeira vigência; antes dela permanecem as referências
+            gerais aplicáveis. Personalizar cria uma cópia nesta empresa para
+            conferência, preservando os valores e as fontes originais.
           </p>
         </div>
         {general.length ? (

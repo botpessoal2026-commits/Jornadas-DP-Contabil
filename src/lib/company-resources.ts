@@ -1,18 +1,20 @@
 import type { Holiday, LegalRule, Model } from "./types";
+import { regimeKey } from "./work-regime";
 
 /** A particular rule takes over its key from its first effective date onward. */
 export function rulesForCompany(rules: LegalRule[], companyId: string) {
   const firstParticular = new Map<string, string>();
   for (const rule of rules) {
     if (rule.empresa_id !== companyId) continue;
-    const first = firstParticular.get(rule.chave);
+    const key = regimeKey(rule);
+    const first = firstParticular.get(key);
     if (!first || rule.inicio_vigencia < first)
-      firstParticular.set(rule.chave, rule.inicio_vigencia);
+      firstParticular.set(key, rule.inicio_vigencia);
   }
   return rules.filter((rule) => {
     if (rule.empresa_id === companyId) return true;
     if (rule.empresa_id != null) return false;
-    const first = firstParticular.get(rule.chave);
+    const first = firstParticular.get(regimeKey(rule));
     return !first || rule.inicio_vigencia < first;
   });
 }

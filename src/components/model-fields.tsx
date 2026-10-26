@@ -1,7 +1,7 @@
 "use client";
 import { useId, useState } from "react";
 import { Copy } from "lucide-react";
-import { formatMinutes } from "@/lib/engine";
+import { formatMinutes, span } from "@/lib/engine";
 import { shiftEditorText, validateShiftText } from "@/lib/shift-editor";
 import type { Company, Model } from "@/lib/types";
 
@@ -48,6 +48,13 @@ export default function ModelFields({
     (total, day) => total + day.worked,
     0,
   );
+  const cycleValidation = validateShiftText(cycleShift);
+  const cycleSpans = (cycleValidation.shifts ?? [])
+    .map(span)
+    .sort((a, b) => a[0] - b[0]);
+  const cycleDuration = cycleSpans.length
+    ? cycleSpans.at(-1)![1] - cycleSpans[0][0]
+    : 0;
 
   return (
     <>
@@ -96,10 +103,15 @@ export default function ModelFields({
           <h3>Somente para ciclo 12×36</h3>
           <p className="subtitle !text-xs mb-4">
             O ciclo alterna dia de turno e dia de descanso a partir da data
-            inicial. Cadastre intervalos e confira a CCT.
+            inicial, inclusive entre meses. Cadastre as pausas e o fundamento
+            aplicável nos parâmetros legais do regime 12×36.
           </p>
           <p className="model-cycle-note muted mb-4">
             A carga semanal varia conforme o ciclo e a competência.
+          </p>
+          <p className="model-cycle-note muted mb-4">
+            O plantão inclui as pausas; as horas trabalhadas descontam os
+            intervalos. O descanso é contado do término até o próximo início.
           </p>
           <div className="form-grid">
             <label>
@@ -119,10 +131,33 @@ export default function ModelFields({
                 required
                 placeholder="07:00-12:00, 13:00-19:00"
                 value={cycleShift}
+                aria-invalid={
+                  cycleValidation.errors.intervals ? true : undefined
+                }
+                aria-describedby={
+                  cycleValidation.errors.intervals
+                    ? `${fieldId}-cycle-error`
+                    : undefined
+                }
                 onChange={(event) => setCycleShift(event.target.value)}
               />
+              {cycleValidation.errors.intervals && (
+                <p className="field-error" id={`${fieldId}-cycle-error`}>
+                  {cycleValidation.errors.intervals}
+                </p>
+              )}
             </label>
           </div>
+          {cycleValidation.shifts && cycleSpans.length > 0 && (
+            <p
+              className="model-cycle-note muted mt-4"
+              role="status"
+              aria-live="polite"
+            >
+              Duração do plantão: {formatMinutes(cycleDuration)} · Horas
+              trabalhadas: {formatMinutes(cycleValidation.worked)}
+            </p>
+          )}
         </div>
       ) : (
         <>

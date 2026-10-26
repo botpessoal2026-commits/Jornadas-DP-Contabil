@@ -1,4 +1,6 @@
 import { buildAlertSummary } from "./alerts";
+import { scheduleRegime } from "./work-regime";
+import { validationDays } from "./schedule-context";
 import { evaluate, holidayAt } from "./engine";
 import {
   holidaysForCompany,
@@ -159,11 +161,11 @@ export function companySummary(data: Data, company: Company, month: string) {
     );
     try {
       const report = evaluate(
-        schedule.dias,
+        validationDays(schedule, scoped.schedules),
         scoped.rules,
         company,
         schedule.mes,
-        schedule.modelo_tipo,
+        scheduleRegime(schedule, scoped.models),
         employee,
       );
       const summary = buildAlertSummary(report.alerts, {
