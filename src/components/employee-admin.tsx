@@ -1,6 +1,6 @@
 "use client";
 import { useState } from "react";
-import { CalendarDays, Plus, UserRound } from "lucide-react";
+import { CalendarDays, FileText, Plus, UserRound } from "lucide-react";
 import { buildAlertSummary } from "@/lib/alerts";
 import {
   computeDay,
@@ -11,6 +11,8 @@ import {
 } from "@/lib/engine";
 import type { Company, Employee } from "@/lib/types";
 import type { Data } from "@/lib/store";
+import { formatCpf } from "@/lib/cpf";
+import { modelsForCompany, rulesForCompany } from "@/lib/company-resources";
 
 type CompanySettings = Company & {
   situacao?: "ativa" | "inativa" | "arquivada";
@@ -59,6 +61,7 @@ export type EmployeeDirectoryProps = {
   onEdit: (employee?: Employee) => void;
   onOpen: (employee: Employee) => void;
   onSchedules: (employee: Employee) => void;
+  onTimesheet?: (employee: Employee) => void;
   onToggleStatus: (employee: Employee) => void;
 };
 export function EmployeeDirectory({
@@ -68,6 +71,7 @@ export function EmployeeDirectory({
   onEdit,
   onOpen,
   onSchedules,
+  onTimesheet,
   onToggleStatus,
 }: EmployeeDirectoryProps) {
   const [search, setSearch] = useState("");
@@ -168,15 +172,16 @@ export function EmployeeDirectory({
             const company = data.companies.find(
               (item) => item.id === employee.empresa_id,
             ) as CompanySettings | undefined;
-            const ownModel = data.models.find(
-              (model) =>
-                model.id === employee.modelo_padrao_id &&
-                (!model.empresa_id || model.empresa_id === employee.empresa_id),
+            const availableModels = modelsForCompany(
+              data.models,
+              employee.empresa_id,
+              [employee.modelo_padrao_id, company?.modelo_padrao_id],
             );
-            const companyModel = data.models.find(
-              (model) =>
-                model.id === company?.modelo_padrao_id &&
-                (!model.empresa_id || model.empresa_id === employee.empresa_id),
+            const ownModel = availableModels.find(
+              (model) => model.id === employee.modelo_padrao_id,
+            );
+            const companyModel = availableModels.find(
+              (model) => model.id === company?.modelo_padrao_id,
             );
             const hasSchedule = data.schedules.some(
               (schedule) =>
@@ -265,6 +270,16 @@ export function EmployeeDirectory({
                       <CalendarDays size={15} />
                       Gerenciar escalas
                     </button>
+                    {onTimesheet && (
+                      <button
+                        className="button small"
+                        disabled={!hasSchedule}
+                        onClick={() => onTimesheet(employee)}
+                      >
+                        <FileText size={15} />
+                        Emitir folha de ponto
+                      </button>
+                    )}
                     <button
                       className="button small"
                       disabled={!canOperate(company)}
@@ -300,6 +315,7 @@ export type EmployeeDetailsProps = {
   month: string;
   onEdit: (employee: Employee) => void;
   onSchedules: (employee: Employee) => void;
+  onTimesheet?: (employee: Employee) => void;
   onClose: () => void;
 };
 export function EmployeeDetails({
@@ -309,6 +325,7 @@ export function EmployeeDetails({
   month,
   onEdit,
   onSchedules,
+  onTimesheet,
   onClose,
 }: EmployeeDetailsProps) {
   const employee = employeeBase as EmployeeSettings;
@@ -325,10 +342,11 @@ export function EmployeeDetails({
       schedule.funcionario_id === employee.id,
   );
   const schedule = schedules.find((item) => item.mes.startsWith(month));
+  const rules = rulesForCompany(data.rules, company.id);
   const result = schedule
     ? evaluate(
         schedule.dias,
-        data.rules,
+        rules,
         company,
         schedule.mes,
         schedule.modelo_tipo,
@@ -342,18 +360,16 @@ export function EmployeeDetails({
     employeeName: employee.nome,
     month,
   });
-  const ownModel = data.models.find(
-    (model) =>
-      model.id === employee.modelo_padrao_id &&
-      (!model.empresa_id || model.empresa_id === company.id),
+  const availableModels = modelsForCompany(data.models, company.id, [
+    employee.modelo_padrao_id,
+    company.modelo_padrao_id,
+  ]);
+  const ownModel = availableModels.find(
+    (model) => model.id === employee.modelo_padrao_id,
   );
   const model =
     ownModel ??
-    data.models.find(
-      (item) =>
-        item.id === company.modelo_padrao_id &&
-        (!item.empresa_id || item.empresa_id === company.id),
-    );
+    availableModels.find((item) => item.id === company.modelo_padrao_id);
   const today = new Intl.DateTimeFormat("sv-SE", {
     year: "numeric",
     month: "2-digit",
@@ -368,12 +384,11 @@ export function EmployeeDetails({
     .filter(
       (day) =>
         day.data >= today &&
-        computeDay(day, data.rules, schedule!.dias).worked === 0,
+        computeDay(day, rules, schedule!.dias).worked === 0,
     )
     .slice(0, 8);
   const plannedHolidays = selectedDays.filter(
-    (day) =>
-      day.feriado && computeDay(day, data.rules, schedule!.dias).worked > 0,
+    (day) => day.feriado && computeDay(day, rules, schedule!.dias).worked > 0,
   );
   const scheduleIds = new Set(schedules.map((item) => item.id));
   const history = (data.logs as CompanyLog[])
@@ -413,6 +428,16 @@ export function EmployeeDetails({
           >
             Gerenciar escalas
           </button>
+          {onTimesheet && (
+            <button
+              className="button"
+              disabled={!schedule}
+              onClick={() => onTimesheet(employee)}
+            >
+              <FileText size={15} />
+              Emitir folha de ponto
+            </button>
+          )}
         </div>
       </div>
       <div className="employee-summary-grid">
@@ -425,6 +450,10 @@ export function EmployeeDetails({
               <div>
                 <dt>Empresa</dt>
                 <dd>{company.nome}</dd>
+              </div>
+              <div>
+                <dt>CPF</dt>
+                <dd>{formatCpf(employee.cpf)}</dd>
               </div>
               <div>
                 <dt>Matrícula</dt>
@@ -574,7 +603,7 @@ export function EmployeeDetails({
                         : "Continuação do turno anterior"}{" "}
                       ·{" "}
                       {formatMinutes(
-                        computeDay(day, data.rules, schedule!.dias).worked,
+                        computeDay(day, rules, schedule!.dias).worked,
                       )}
                     </p>
                   </li>

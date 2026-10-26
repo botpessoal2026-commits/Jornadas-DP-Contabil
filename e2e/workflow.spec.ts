@@ -60,6 +60,9 @@ test("demonstração: calendário, edições, exportações, duplicação e cada
     page.getByRole("heading", { name: "Empresa de teste", exact: true }),
   ).toBeVisible();
   await page
+    .getByRole("button", { name: "Todas as empresas", exact: true })
+    .click();
+  await page
     .getByRole("button", { name: "Parâmetros legais", exact: true })
     .click();
   await expect(

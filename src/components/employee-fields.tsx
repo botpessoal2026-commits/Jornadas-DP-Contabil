@@ -2,6 +2,7 @@
 import { useId, useState } from "react";
 import type { Company, Employee, Model } from "@/lib/types";
 import { formatCpf } from "@/lib/cpf";
+import { modelsForCompany } from "@/lib/company-resources";
 
 type CompanyDefaults = Company & {
   situacao?: "ativa" | "inativa" | "arquivada";
@@ -63,9 +64,10 @@ export default function EmployeeFields({
     ),
   );
   const [weeklyTouched, setWeeklyTouched] = useState(false);
-  const availableModels = models.filter(
-    (model) => !model.empresa_id || model.empresa_id === selectedCompany,
-  );
+  const availableModels = modelsForCompany(models, selectedCompany, [
+    employee?.modelo_padrao_id,
+    company?.modelo_padrao_id,
+  ]);
   const companyModel = availableModels.find(
     (model) => model.id === company?.modelo_padrao_id,
   );
@@ -204,8 +206,15 @@ export default function EmployeeFields({
         >
           <option value="">Herdar padrão da empresa</option>
           {availableModels.map((model) => (
-            <option key={model.id} value={model.id}>
+            <option
+              key={model.id}
+              value={model.id}
+              disabled={
+                !model.empresa_id && model.id !== employee?.modelo_padrao_id
+              }
+            >
               {model.nome}
+              {model.empresa_id ? "" : " · biblioteca vinculada (legado)"}
               {model.tipo === "6x1" && !company?.permite_6x1
                 ? " — depende de autorização da empresa"
                 : ""}
@@ -216,7 +225,8 @@ export default function EmployeeFields({
       <p className="span2 muted">
         Padrão atual da empresa: {companyModel?.nome ?? "não definido"}. Um
         modelo individual tem prioridade. Trocar o padrão da empresa não
-        modifica jornadas individuais nem escalas já salvas.
+        modifica jornadas individuais nem escalas já salvas. Para vincular um
+        modelo-base novo, copie-o primeiro em Jornadas e modelos da empresa.
       </p>
       <label htmlFor={`${id}-daily`}>
         Carga diária contratual (horas)

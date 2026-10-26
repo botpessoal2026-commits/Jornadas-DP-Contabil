@@ -30,9 +30,13 @@ async function setup() {
   const migrations = (await readdir("supabase/migrations"))
     .filter((file) => file.endsWith(".sql"))
     .sort();
+  const administrationMigration = migrations.find((file) =>
+    file.endsWith("_company_administration.sql"),
+  );
+  assert.ok(administrationMigration);
   // Start with actual pre-upgrade rows, not fixtures already using the new schema.
   for (const file of migrations.filter(
-    (file) => !file.endsWith("_company_administration.sql"),
+    (file) => file < administrationMigration,
   ))
     await db.exec(await readFile(`supabase/migrations/${file}`, "utf8"));
   await db.query("insert into auth.users values ($1),($2)", [
@@ -76,10 +80,9 @@ async function setup() {
     ]),
   ]);
   await db.exec("reset role");
-  for (const file of migrations.filter((file) =>
-    file.endsWith("_company_administration.sql"),
-  ))
-    await db.exec(await readFile(`supabase/migrations/${file}`, "utf8"));
+  await db.exec(
+    await readFile(`supabase/migrations/${administrationMigration}`, "utf8"),
+  );
   await db.exec("set role authenticated");
   return db;
 }

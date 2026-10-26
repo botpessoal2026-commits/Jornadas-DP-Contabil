@@ -1,5 +1,10 @@
 import { buildAlertSummary } from "./alerts";
 import { evaluate, holidayAt } from "./engine";
+import {
+  holidaysForCompany,
+  modelsForCompany,
+  rulesForCompany,
+} from "./company-resources";
 import type { Data } from "./store";
 import type { Company, Employee, Model } from "./types";
 
@@ -10,6 +15,7 @@ export type CompanyView =
   | "modelos"
   | "escalas"
   | "feriados"
+  | "regras"
   | "configuracoes"
   | "historico";
 
@@ -71,14 +77,13 @@ export function scopeCompanyData(data: Data, companyId: string): Data {
     ...data,
     companies: [company],
     employees,
-    models: data.models.filter(
-      (entry) => !entry.empresa_id || entry.empresa_id === companyId,
-    ),
+    models: data.models.filter((entry) => entry.empresa_id === companyId),
+    rules: rulesForCompany(data.rules, companyId),
     schedules: data.schedules.filter(
       (entry) =>
         entry.empresa_id === companyId && employeeIds.has(entry.funcionario_id),
     ),
-    holidays: data.holidays.filter((holiday) =>
+    holidays: holidaysForCompany(data.holidays, companyId).filter((holiday) =>
       Boolean(holidayAt(holiday.data, [holiday], company)),
     ),
     // Old events without a reliable company stay in the global history only.
@@ -97,12 +102,15 @@ export function resolveEmployeeModelWithOrigin(
   company: Company,
   models: Model[],
   explicitModelId?: string,
+  legacyModelIds: readonly (string | null | undefined)[] = [],
 ): { model: Model | undefined; origin: ModelOrigin } {
   if (employee.empresa_id !== company.id)
     return { model: undefined, origin: "none" };
-  const available = models.filter(
-    (model) => !model.empresa_id || model.empresa_id === company.id,
-  );
+  const available = modelsForCompany(models, company.id, [
+    employee.modelo_padrao_id,
+    company.modelo_padrao_id,
+    ...legacyModelIds,
+  ]);
   for (const [id, origin] of [
     [explicitModelId, "explicit"],
     [employee.modelo_padrao_id, "employee"],
@@ -111,22 +119,22 @@ export function resolveEmployeeModelWithOrigin(
     const model = id ? available.find((entry) => entry.id === id) : undefined;
     if (model) return { model, origin };
   }
-  return {
-    model: available[0],
-    origin: available.length ? "fallback" : "none",
-  };
+  const fallback = available.find((model) => model.empresa_id === company.id);
+  return { model: fallback, origin: fallback ? "fallback" : "none" };
 }
 export function resolveEmployeeModel(
   employee: Employee,
   company: Company,
   models: Model[],
   explicitModelId?: string,
+  legacyModelIds: readonly (string | null | undefined)[] = [],
 ) {
   return resolveEmployeeModelWithOrigin(
     employee,
     company,
     models,
     explicitModelId,
+    legacyModelIds,
   ).model;
 }
 

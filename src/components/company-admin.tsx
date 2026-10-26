@@ -71,7 +71,11 @@ export default function CompanyAdmin({
         <span aria-hidden="true">/</span>
         <span>{companyDisplayName(company)}</span>
         <span aria-hidden="true">/</span>
-        <strong>{views.find((item) => item.id === view)?.label}</strong>
+        <strong>
+          {view === "regras"
+            ? "Parâmetros legais"
+            : views.find((item) => item.id === view)?.label}
+        </strong>
       </nav>
       <section
         className="panel company-context"
@@ -127,8 +131,12 @@ export default function CompanyAdmin({
             <button
               type="button"
               key={id}
-              className={`tab ${view === id ? "active" : ""}`}
-              aria-current={view === id ? "page" : undefined}
+              className={`tab ${view === id || (id === "configuracoes" && view === "regras") ? "active" : ""}`}
+              aria-current={
+                view === id || (id === "configuracoes" && view === "regras")
+                  ? "page"
+                  : undefined
+              }
               onClick={() => onNavigate(id)}
             >
               <Icon size={15} aria-hidden="true" />
@@ -376,6 +384,11 @@ export default function CompanyAdmin({
               modifica a jornada individual, contratos ou escalas já
               cadastrados.
             </p>
+            <div className="actions">
+              <button className="button" onClick={() => onNavigate("regras")}>
+                Parâmetros legais desta empresa
+              </button>
+            </div>
             {onStatusChange && (
               <div className="actions company-status-actions">
                 {situation !== "ativa" && (

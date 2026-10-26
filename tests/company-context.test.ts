@@ -164,7 +164,7 @@ test("contexto individual restringe funcionários, escalas, modelos e histórico
   );
   assert.deepEqual(
     scoped.models.map((model) => model.id),
-    ["shared", "alpha-model", "individual-model"],
+    ["alpha-model", "individual-model"],
   );
   assert.deepEqual(
     scoped.logs.map((log) => log.id),
@@ -217,7 +217,7 @@ test("seleção explícita, modelo da empresa e sugestão compartilham somente m
   const { alpha, beta, personA, models } = fixture();
   assert.equal(
     resolveEmployeeModel(personA, alpha, models, "shared")?.id,
-    "shared",
+    "individual-model",
   );
   assert.equal(
     resolveEmployeeModel(personA, alpha, models, "beta-model")?.id,

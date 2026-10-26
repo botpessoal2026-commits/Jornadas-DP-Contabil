@@ -1,4 +1,5 @@
 import type { Company, Model } from "@/lib/types";
+import { modelsForCompany } from "@/lib/company-resources";
 
 export default function CompanyFields({
   company,
@@ -7,9 +8,9 @@ export default function CompanyFields({
   company?: Company;
   models: Model[];
 }) {
-  const available = models.filter(
-    (model) => !model.empresa_id || model.empresa_id === company?.id,
-  );
+  const available = company
+    ? modelsForCompany(models, company.id, [company.modelo_padrao_id])
+    : [];
   return (
     <>
       <p className="span2 muted">
@@ -133,11 +134,16 @@ export default function CompanyFields({
           {available.map((model) => (
             <option key={model.id} value={model.id}>
               {model.nome}
-              {model.empresa_id ? "" : " · referência compartilhada"}
+              {model.empresa_id ? "" : " · biblioteca vinculada (legado)"}
             </option>
           ))}
         </select>
       </label>
+      <p className="span2 muted">
+        Para usar um modelo-base, copie-o em Jornadas e modelos desta empresa. A
+        cópia poderá ser personalizada sem alterar a biblioteca ou outras
+        empresas.
+      </p>
       <label>
         Carga semanal padrão (horas)
         <input
@@ -202,6 +208,14 @@ export default function CompanyFields({
           defaultChecked={company?.usa_banco_horas ?? false}
         />
         Usa banco de horas
+      </label>
+      <label className="check-label">
+        <input
+          name="folgar_feriados"
+          type="checkbox"
+          defaultChecked={company?.folgar_feriados ?? true}
+        />
+        Folgar nos feriados ao gerar escalas
       </label>
       <label className="span2">
         Política de funcionamento em domingos e feriados

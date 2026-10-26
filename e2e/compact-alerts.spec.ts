@@ -3,6 +3,42 @@ import { test, expect, type Page } from "@playwright/test";
 async function openMonthWithoutOccurrences(page: Page) {
   await page.goto("/");
   await page.getByRole("button", { name: "Explorar demonstração" }).click();
+  await page
+    .locator(".sidebar")
+    .getByRole("button", { name: "Empresas", exact: true })
+    .click();
+  await page
+    .locator(".company-card")
+    .filter({ hasText: "Aurora Contabilidade" })
+    .getByRole("button", { name: "Acessar empresa", exact: true })
+    .click();
+  await page
+    .getByRole("navigation", { name: "Administração da empresa", exact: true })
+    .getByRole("button", { name: "Jornadas e modelos", exact: true })
+    .click();
+  await page
+    .getByRole("region", { name: "Biblioteca de modelos-base", exact: true })
+    .locator(".panel")
+    .filter({
+      has: page.getByRole("heading", {
+        name: "5×2 · 42h · seg a sex",
+        exact: true,
+      }),
+    })
+    .getByRole("button", { name: "Personalizar nesta empresa", exact: true })
+    .click();
+  await page
+    .getByRole("dialog")
+    .getByLabel("Nome do modelo", { exact: true })
+    .fill("Jornada própria E2E de conferência");
+  await page
+    .getByRole("dialog")
+    .getByRole("button", { name: "Salvar cadastro", exact: true })
+    .click();
+  await expect(page.getByRole("dialog")).not.toBeVisible();
+  await page
+    .getByRole("button", { name: "Todas as empresas", exact: true })
+    .click();
   await page.getByRole("button", { name: "Escalas mensais" }).click();
   await page.getByLabel("Mês da escala", { exact: true }).fill("2026-11");
   await page.getByRole("button", { name: "Gerar prévia" }).click();

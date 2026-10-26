@@ -15,6 +15,7 @@ export type Company = {
   permite_6x1: boolean;
   limite_diario_minutos: number | null;
   usa_banco_horas: boolean;
+  folgar_feriados?: boolean;
   nome_fantasia?: string;
   codigo_interno?: string;
   situacao?: "ativa" | "inativa" | "arquivada";
@@ -59,6 +60,7 @@ export type Model = {
 };
 export type LegalRule = {
   id: string;
+  empresa_id?: string | null;
   nome: string;
   chave: string;
   valor: Record<string, number | boolean | string>;
@@ -69,6 +71,7 @@ export type LegalRule = {
 };
 export type Holiday = {
   id: string;
+  empresa_id?: string | null;
   nome: string;
   data: string;
   abrangencia: "nacional" | "estadual" | "municipal";

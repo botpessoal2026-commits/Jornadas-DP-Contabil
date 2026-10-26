@@ -1,4 +1,5 @@
 import { periodForAlert } from "./alerts";
+import { holidaysForCompany, rulesForCompany } from "./company-resources";
 import type {
   Alert,
   Company,
@@ -74,7 +75,7 @@ export function numberValue(
   return typeof v === "number" && Number.isFinite(v) ? v : undefined;
 }
 export function holidayAt(date: string, holidays: Holiday[], company: Company) {
-  return holidays.find(
+  return holidaysForCompany(holidays, company.id).find(
     (h) =>
       h.data === date &&
       (h.abrangencia === "nacional" ||
@@ -92,6 +93,10 @@ export function generateDays(
   restOnHolidays = true,
   includeBoundary = true,
 ): Day[] {
+  if (model.empresa_id != null && model.empresa_id !== company.id)
+    throw new Error(
+      "O modelo de jornada deve pertencer à empresa selecionada.",
+    );
   const dates = monthDates(month);
   const start = includeBoundary ? addDays(monday(dates[0]), -1) : dates[0];
   const end = includeBoundary
@@ -184,6 +189,7 @@ export function evaluate(
   modelType?: Model["tipo"],
   employee?: Employee,
 ) {
+  rules = rulesForCompany(rules, company.id);
   const alerts: Alert[] = [];
   const ordered = [...days].sort((a, b) => a.data.localeCompare(b.data));
   const selected = ordered.filter((d) => d.data.startsWith(month.slice(0, 7)));
