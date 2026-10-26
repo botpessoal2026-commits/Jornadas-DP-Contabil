@@ -1,6 +1,7 @@
 import type { Data } from "./store";
 import type { Company, Employee, Schedule } from "./types";
 import { alertsForDate, buildAlertSummary } from "./alerts";
+import { rulesForCompany } from "./company-resources";
 import {
   computeDay,
   evaluate,
@@ -41,6 +42,7 @@ export function teamScheduleRows(
     .filter((employee) => companies.has(employee.empresa_id))
     .map((employee) => {
       const company = companies.get(employee.empresa_id)!;
+      const rules = rulesForCompany(data.rules, company.id);
       const schedule = data.schedules.find(
         (entry) =>
           entry.empresa_id === company.id &&
@@ -53,7 +55,7 @@ export function teamScheduleRows(
         try {
           const report = evaluate(
             schedule.dias,
-            data.rules,
+            rules,
             company,
             schedule.mes,
             schedule.modelo_tipo,
@@ -76,7 +78,7 @@ export function teamScheduleRows(
         if (!schedule || !day)
           return { date, state: "missing", shifts: [], problem: null };
         try {
-          const result = computeDay(day, data.rules, schedule.dias);
+          const result = computeDay(day, rules, schedule.dias);
           const alerts = alertsForDate(groups, date);
           return {
             date,

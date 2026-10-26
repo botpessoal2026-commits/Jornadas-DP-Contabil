@@ -45,6 +45,8 @@ import {
   loadCompanyLogs,
   type AuditLog,
   saveRow,
+  saveCompanyRow,
+  deleteCompanyModel,
   saveSchedules,
   type Data,
 } from "@/lib/store";
@@ -83,7 +85,17 @@ import { validateShiftText } from "@/lib/shift-editor";
 import AuditHistory from "./audit-history";
 import { EmployeeDirectory, EmployeeDetails } from "./employee-admin";
 import EmployeeFields from "./employee-fields";
-import { scopeCompanyData, resolveEmployeeModel } from "@/lib/company-context";
+import {
+  scopeCompanyData,
+  resolveEmployeeModelWithOrigin,
+} from "@/lib/company-context";
+import { modelsForCompany, rulesForCompany } from "@/lib/company-resources";
+import {
+  parseWorkspaceLocation,
+  workspaceHref,
+  type WorkspaceLocation,
+} from "@/lib/workspace-navigation";
+import { CompanyResources } from "./company-resources";
 import DayEditor from "./day-editor";
 import ScheduleAlerts from "./schedule-alerts";
 import { alertsForDate, buildAlertSummary } from "@/lib/alerts";
@@ -270,6 +282,12 @@ function Dialog({
 
 export default function Workspace() {
   const authUserId = useRef<string | null>(null);
+  const [navigationReady, setNavigationReady] = useState(false);
+  const [dataLoaded, setDataLoaded] = useState(false);
+  const [dataLoading, setDataLoading] = useState(false);
+  const [dataLoadError, setDataLoadError] = useState<string | null>(null);
+  const [loadAttempt, setLoadAttempt] = useState(0);
+  const currentHref = useRef("/");
   const [user, setUser] = useState<User | null>(null),
     [demo, setDemo] = useState(false),
     [authReady, setAuthReady] = useState(false),
@@ -307,6 +325,8 @@ export default function Workspace() {
   >("idle");
   const operationPending = useRef(false);
   const [companyScopeId, setCompanyScopeId] = useState<string | null>(null);
+  const activeDataContext = useRef("");
+  activeDataContext.current = `${user?.id ?? ""}|${companyScopeId ?? ""}`;
   const [detailEmployeeId, setDetailEmployeeId] = useState<string | null>(null);
   const [companyAudit, setCompanyAudit] = useState<{
     companyId: string;
@@ -354,7 +374,42 @@ export default function Workspace() {
     message: string;
     accept: () => void;
   } | null>(null);
+  const applyLocation = (location: WorkspaceLocation) => {
+    setCompanyScopeId(location.companyId);
+    setCompanyId(location.companyId ?? "");
+    setEmployeeId(location.employeeId ?? "");
+    setDetailEmployeeId(
+      location.page === "employee-detail" ? location.employeeId : null,
+    );
+    setModelId("");
+    setPage(location.page);
+    if (location.month) setMonth(location.month);
+    setScheduleView(location.scheduleView ?? "individual");
+    setDraft(null);
+    setDirty(false);
+    setActiveDate(null);
+    setModal(null);
+    setConfirmation(null);
+    setMobile(false);
+  };
+  useEffect(() => {
+    const location = parseWorkspaceLocation(window.location.search);
+    if (location.demo) {
+      setData(demoData());
+      setDemo(true);
+      setDataLoaded(true);
+      if (!location.month) setMonth("2026-12");
+    }
+    applyLocation(location);
+    setNavigationReady(true);
+  }, []);
   const notify = (text: string, error = false) => setToast({ text, error });
+  function assertDataContext(expected: string) {
+    if (expected !== activeDataContext.current)
+      throw new Error(
+        "O contexto de acesso foi alterado. A operação foi interrompida.",
+      );
+  }
   useEffect(() => {
     const leave = (e: BeforeUnloadEvent) => {
       if (dirty) {
@@ -387,7 +442,10 @@ export default function Workspace() {
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((event, session) => {
-      if (authUserId.current !== (session?.user.id ?? null)) {
+      if (
+        authUserId.current !== null &&
+        authUserId.current !== (session?.user.id ?? null)
+      ) {
         setData(emptyData);
         setScheduleView("individual");
         setDraft(null);
@@ -404,8 +462,8 @@ export default function Workspace() {
           loading: false,
           hasMore: false,
         });
-        authUserId.current = session?.user.id ?? null;
       }
+      authUserId.current = session?.user.id ?? null;
       setUser(session?.user ?? null);
       if (event === "PASSWORD_RECOVERY") setAuthMode("password");
     });
@@ -415,36 +473,115 @@ export default function Workspace() {
     };
   }, []);
   useEffect(() => {
-    if (!user || demo) return;
+    if (!user || demo || !navigationReady) return;
     let alive = true;
-    setBusy(true);
-    loadData()
+    setDataLoading(true);
+    setDataLoaded(false);
+    setDataLoadError(null);
+    loadData(companyScopeId)
       .then((d) => {
         if (alive) setData(d);
       })
       .catch((e) => {
-        if (alive) notify(e.message, true);
+        if (alive) setDataLoadError(e.message);
       })
       .finally(() => {
-        if (alive) setBusy(false);
+        if (alive) {
+          setDataLoading(false);
+          setDataLoaded(true);
+        }
       });
     return () => {
       alive = false;
     };
-  }, [user, demo]);
+  }, [user?.id, demo, companyScopeId, navigationReady, loadAttempt]);
+  useEffect(() => {
+    if (!navigationReady || (!user && !demo)) return;
+    const href = workspaceHref({
+      page,
+      companyId: companyScopeId,
+      employeeId: companyScopeId
+        ? detailEmployeeId || employeeId || null
+        : null,
+      month,
+      scheduleView,
+      demo,
+    });
+    if (`${window.location.pathname}${window.location.search}` !== href)
+      window.history.pushState(null, "", href);
+    currentHref.current = href;
+  }, [
+    navigationReady,
+    user?.id,
+    demo,
+    page,
+    companyScopeId,
+    detailEmployeeId,
+    employeeId,
+    month,
+    scheduleView,
+  ]);
+  useEffect(() => {
+    const pop = () => {
+      if (operationPending.current) {
+        window.history.pushState(null, "", currentHref.current);
+        notify("Aguarde a operação atual antes de trocar o contexto.");
+        return;
+      }
+      const next = parseWorkspaceLocation(window.location.search);
+      if (dirty) {
+        window.history.pushState(null, "", currentHref.current);
+        setConfirmation({
+          title: "Descartar alterações não salvas?",
+          message:
+            "A navegação descarta a prévia atual. As escalas salvas serão preservadas.",
+          accept: () => applyLocation(next),
+        });
+      } else applyLocation(next);
+    };
+    window.addEventListener("popstate", pop);
+    return () => window.removeEventListener("popstate", pop);
+  }, [dirty]);
   useEffect(() => {
     if (!companyId && data.companies.length) setCompanyId(data.companies[0].id);
   }, [data, companyId, modelId]);
   const company = data.companies.find((c) => c.id === companyId);
+  useEffect(() => {
+    setRestHoliday(company?.folgar_feriados ?? true);
+  }, [company?.id, company?.folgar_feriados]);
   const employees = data.employees.filter((e) => e.empresa_id === companyId);
-  const employee = employees.find((e) => e.id === employeeId) ?? employees[0];
-  const models = data.models.filter(
-    (m) => !m.empresa_id || m.empresa_id === companyId,
+  const employee = employeeId
+    ? employees.find((e) => e.id === employeeId)
+    : employees[0];
+  const saved = data.schedules.find(
+    (s) =>
+      s.empresa_id === companyId &&
+      s.funcionario_id === employee?.id &&
+      s.mes.startsWith(month),
   );
-  const model =
+  const models = modelsForCompany(data.models, companyId, [
+    employee?.modelo_padrao_id,
+    company?.modelo_padrao_id,
+    saved?.modelo_id,
+  ]);
+  const scheduleRules = rulesForCompany(data.rules, companyId);
+  const modelResolution =
     employee && company
-      ? resolveEmployeeModel(employee, company, models, modelId || undefined)
-      : models[0];
+      ? resolveEmployeeModelWithOrigin(
+          employee,
+          company,
+          models,
+          modelId || undefined,
+          [saved?.modelo_id],
+        )
+      : {
+          model: models.find((entry) => entry.empresa_id === companyId),
+          origin: "fallback" as const,
+        };
+  const model = ["fallback", "none"].includes(modelResolution.origin)
+    ? (models.find((entry) => entry.id === saved?.modelo_id) ??
+      modelResolution.model)
+    : modelResolution.model;
   const scopedCompany = data.companies.find((c) => c.id === companyScopeId);
   const scopedData = companyScopeId
     ? scopeCompanyData(data, companyScopeId)
@@ -456,12 +593,6 @@ export default function Workspace() {
   const scheduleReadOnly = companyReadOnly || employee?.situacao === "inativo";
   const detailEmployee = scopedData.employees.find(
     (e) => e.id === detailEmployeeId,
-  );
-  const saved = data.schedules.find(
-    (s) =>
-      s.empresa_id === companyId &&
-      s.funcionario_id === employee?.id &&
-      s.mes.startsWith(month),
   );
   const schedule = draft ?? saved;
   const calculation = useMemo(() => {
@@ -553,8 +684,14 @@ export default function Workspace() {
             : "Salvo";
   const pendingRules = data.rules.filter((r) => !r.confirmado).length;
   const changeContext = (callback: () => void) => {
+    if (operationPending.current) {
+      notify("Aguarde a operação atual antes de trocar o contexto.");
+      return;
+    }
     const apply = () => {
       callback();
+      setModal(null);
+      setConfirmation(null);
       setDraft(null);
       setDirty(false);
       setSaveState("idle");
@@ -587,14 +724,20 @@ export default function Workspace() {
       setBusy(false);
     }
   }
-  async function refresh() {
-    if (!demo) setData(await loadData());
+  async function refresh(expected = activeDataContext.current) {
+    assertDataContext(expected);
+    if (!demo) {
+      const next = await loadData(companyScopeId);
+      assertDataContext(expected);
+      setData(next);
+    }
   }
   async function rowSave(
     table: string,
     value: Record<string, unknown>,
     id?: string,
   ) {
+    const expected = activeDataContext.current;
     const key = (
       {
         empresas: "companies",
@@ -613,11 +756,37 @@ export default function Workspace() {
     ];
     const before = data[key]?.find((r) => r.id === id) as unknown as
       Record<string, unknown> | undefined;
-    const targetCompanyId = String(
-      value.empresa_id ?? before?.empresa_id ?? "",
-    );
+    const targetCompanyId =
+      table === "empresas"
+        ? (id ?? "")
+        : String(value.empresa_id ?? before?.empresa_id ?? "");
+    if (companyScopeId && table !== "empresas") {
+      if (
+        targetCompanyId !== companyScopeId ||
+        (before && before.empresa_id !== companyScopeId)
+      )
+        throw new Error(
+          "O registro deve pertencer à empresa ativa. Copie referências gerais antes de personalizar.",
+        );
+    }
+    if (companyScopeId && table === "empresas" && id !== companyScopeId)
+      throw new Error("A configuração deve pertencer à empresa ativa.");
     if (
-      ["funcionarios", "modelos_jornada"].includes(table) &&
+      before &&
+      table !== "empresas" &&
+      (before.empresa_id ?? null) !==
+        (value.empresa_id ?? before.empresa_id ?? null)
+    )
+      throw new Error(
+        "O vínculo empresarial do registro não pode ser alterado.",
+      );
+    if (
+      [
+        "funcionarios",
+        "modelos_jornada",
+        "feriados",
+        "parametros_legais",
+      ].includes(table) &&
       targetCompanyId
     ) {
       const targetCompany = data.companies.find(
@@ -625,7 +794,7 @@ export default function Workspace() {
       );
       if (!targetCompany || (targetCompany.situacao ?? "ativa") !== "ativa")
         throw new Error(
-          "Reative a empresa antes de alterar seus cadastros e jornadas.",
+          "Reative a empresa antes de alterar seus cadastros e configurações.",
         );
       if (companyScopeId && targetCompanyId !== companyScopeId)
         throw new Error("A operação deve pertencer à empresa ativa.");
@@ -645,11 +814,21 @@ export default function Workspace() {
     if (
       value.modelo_padrao_id &&
       (!selectedDefault ||
-        (selectedDefault.empresa_id &&
-          selectedDefault.empresa_id !== defaultCompanyId))
+        (selectedDefault.empresa_id
+          ? selectedDefault.empresa_id !== defaultCompanyId
+          : before?.modelo_padrao_id !== value.modelo_padrao_id))
     )
       throw new Error(
-        "O modelo padrão deve pertencer a esta empresa ou ser uma referência compartilhada.",
+        "Copie o modelo-base para esta empresa antes de vinculá-lo como padrão.",
+      );
+    if (
+      table === "modelos_jornada" &&
+      before &&
+      !before.empresa_id &&
+      modelInUse(before.id as string)
+    )
+      throw new Error(
+        "Este modelo-base está vinculado a cadastros ou escalas. Faça uma cópia para personalizar sem alterar os vínculos existentes.",
       );
     let rowId = id ?? crypto.randomUUID();
     if (demo) {
@@ -686,10 +865,80 @@ export default function Workspace() {
           }) as Data,
       );
     } else {
-      rowId = await saveRow(table, value, id);
-      await refresh();
+      rowId = targetCompanyId
+        ? await saveCompanyRow(targetCompanyId, table, value, id)
+        : await saveRow(table, value, id);
+      await refresh(expected);
     }
+    assertDataContext(expected);
     return rowId;
+  }
+  function modelInUse(id: string) {
+    return (
+      data.companies.some((entry) => entry.modelo_padrao_id === id) ||
+      data.employees.some((entry) => entry.modelo_padrao_id === id) ||
+      data.schedules.some((entry) => entry.modelo_id === id)
+    );
+  }
+  const deleteModel = (model: Model) => {
+    if (!companyScopeId || model.empresa_id !== companyScopeId) {
+      notify("Selecione um modelo próprio da empresa ativa.", true);
+      return;
+    }
+    setConfirmation({
+      title: "Excluir modelo de jornada?",
+      message: `${model.nome}: somente modelos sem vínculos podem ser excluídos. Cadastros e escalas serão preservados.`,
+      accept: () =>
+        void perform(async () => {
+          if (modelInUse(model.id))
+            throw new Error(
+              "O modelo está vinculado a funcionários, configurações ou escalas e não pode ser excluído.",
+            );
+          if (demo)
+            setData((current) => ({
+              ...current,
+              models: current.models.filter((entry) => entry.id !== model.id),
+              logs: [
+                {
+                  id: crypto.randomUUID(),
+                  tabela: "modelos_jornada",
+                  acao: "DELETE",
+                  alterado_em: new Date().toISOString(),
+                  registro_id: model.id,
+                  empresa_id: companyScopeId,
+                  ator_id: "demo-user",
+                  antes: { ...model },
+                  depois: null,
+                  campos: [],
+                },
+                ...current.logs,
+              ],
+            }));
+          else {
+            await deleteCompanyModel(companyScopeId, model.id);
+            await refresh();
+          }
+          notify("Modelo sem vínculos excluído desta empresa.");
+        }),
+    });
+  };
+  async function ownModel(model: Model): Promise<Model> {
+    const expected = activeDataContext.current;
+    if (!company) throw new Error("Selecione uma empresa.");
+    if (model.empresa_id === company.id) return model;
+    if (model.empresa_id) throw new Error("O modelo pertence a outra empresa.");
+    const copy = {
+      nome: model.nome,
+      tipo: model.tipo,
+      padrao: structuredClone(model.padrao),
+      ciclo_inicio: model.ciclo_inicio ?? null,
+      turno: model.turno ? structuredClone(model.turno) : null,
+      empresa_id: company.id,
+    };
+    const id = await rowSave("modelos_jornada", copy);
+    assertDataContext(expected);
+    setModelId(id);
+    return { ...copy, id };
   }
   function withNeighbors(s: Schedule): Schedule {
     const actual = new Map<string, Day>();
@@ -741,6 +990,7 @@ export default function Workspace() {
     });
   }
   async function persistSchedules(items: Schedule[]) {
+    const expected = activeDataContext.current;
     for (const item of items) {
       const target = data.companies.find((c) => c.id === item.empresa_id);
       const person = data.employees.find(
@@ -795,15 +1045,18 @@ export default function Workspace() {
         };
       });
     } else {
-      await saveSchedules(items);
-      await refresh();
+      await saveSchedules(items, companyScopeId ?? items[0]?.empresa_id);
+      await refresh(expected);
     }
+    assertDataContext(expected);
   }
   async function saveCurrent() {
     if (!schedule) return;
+    const expected = activeDataContext.current;
     setSaveState("saving");
     try {
       await persistSchedules([schedule]);
+      assertDataContext(expected);
       setSaveState("saved");
     } catch (error) {
       setSaveState("error");
@@ -819,6 +1072,7 @@ export default function Workspace() {
   }
   async function duplicate(all: boolean) {
     if (!company || !schedule) return;
+    const expected = activeDataContext.current;
     const target = nextMonth(month);
     const source = all
       ? data.schedules.filter(
@@ -829,29 +1083,11 @@ export default function Workspace() {
       throw new Error(
         "Salve as escalas de origem antes de duplicar a empresa.",
       );
-    const targets = source.map((s) => {
-      const m = data.models.find((m) => m.id === s.modelo_id),
-        e = data.employees.find((e) => e.id === s.funcionario_id);
-      if (!m || !e)
-        throw new Error(
-          "Modelo ou funcionário da escala não está mais disponível.",
-        );
-      const next = createSchedule(e, m, target);
-      return withNeighbors({
-        ...next,
-        dias: duplicateDays(
-          s.dias.filter((d) => d.data.startsWith(s.mes.slice(0, 7))),
-          target,
-          m,
-          company,
-          data.holidays,
-          restHoliday,
-        ),
-      });
-    });
-    const conflicts = targets.filter((t) =>
+    const conflicts = source.filter((entry) =>
       data.schedules.some(
-        (s) => s.funcionario_id === t.funcionario_id && s.mes === t.mes,
+        (saved) =>
+          saved.funcionario_id === entry.funcionario_id &&
+          saved.mes.startsWith(target),
       ),
     );
     if (
@@ -861,7 +1097,35 @@ export default function Workspace() {
       )
     )
       return;
+    const copiedModels = new Map<string, Model>();
+    const targets: Schedule[] = [];
+    for (const s of source) {
+      const m = data.models.find((m) => m.id === s.modelo_id),
+        e = data.employees.find((e) => e.id === s.funcionario_id);
+      if (!m || !e)
+        throw new Error(
+          "Modelo ou funcionário da escala não está mais disponível.",
+        );
+      const owned = copiedModels.get(m.id) ?? (await ownModel(m));
+      assertDataContext(expected);
+      copiedModels.set(m.id, owned);
+      const next = createSchedule(e, owned, target);
+      targets.push(
+        withNeighbors({
+          ...next,
+          dias: duplicateDays(
+            s.dias.filter((d) => d.data.startsWith(s.mes.slice(0, 7))),
+            target,
+            owned,
+            company,
+            data.holidays,
+            restHoliday,
+          ),
+        }),
+      );
+    }
     await persistSchedules(targets);
+    assertDataContext(expected);
     setMonth(target);
     setDraft(null);
     setDirty(false);
@@ -910,13 +1174,14 @@ export default function Workspace() {
     if (!modal || (modal.kind === "dia" && !editedDay)) return;
     const fd = new FormData(event.currentTarget);
     const id = modal.row?.id as string | undefined;
+    const expected = activeDataContext.current;
     await perform(async () => {
       if (modal.kind === "empresa") {
         const cnpj = pick(fd, "cnpj").replace(/\D/g, "");
         if (cnpj && !cnpjValid(cnpj))
           throw new Error("Informe um CNPJ válido com 14 dígitos.");
         const limit = pick(fd, "limite");
-        await rowSave(
+        const savedCompanyId = await rowSave(
           "empresas",
           {
             nome_fantasia: pick(fd, "nome_fantasia"),
@@ -942,9 +1207,18 @@ export default function Workspace() {
               ? Math.round(Number(limit) * 60)
               : null,
             usa_banco_horas: fd.has("banco"),
+            folgar_feriados: fd.has("folgar_feriados"),
           },
           id,
         );
+        assertDataContext(expected);
+        if (!id) {
+          setCompanyScopeId(savedCompanyId);
+          setCompanyId(savedCompanyId);
+          setEmployeeId("");
+          setModelId("");
+          setPage("company-overview");
+        }
       }
       if (modal.kind === "funcionario") {
         const cpf = normalizeCpf(pick(fd, "cpf"));
@@ -1028,6 +1302,7 @@ export default function Workspace() {
         await rowSave(
           "feriados",
           {
+            empresa_id: modal.row?.empresa_id ?? companyScopeId ?? null,
             nome: pick(fd, "nome"),
             data: pick(fd, "data"),
             abrangencia,
@@ -1082,6 +1357,7 @@ export default function Workspace() {
         await rowSave(
           "parametros_legais",
           {
+            empresa_id: modal.row?.empresa_id ?? companyScopeId ?? null,
             nome: pick(fd, "nome"),
             chave,
             valor: value,
@@ -1102,6 +1378,7 @@ export default function Workspace() {
         setDraft({ ...schedule, dias: changed });
         setDirty(true);
       }
+      assertDataContext(expected);
       setModal(null);
       notify(
         modal.kind === "dia"
@@ -1116,7 +1393,7 @@ export default function Workspace() {
     if (
       scopedCompany &&
       (scopedCompany.situacao ?? "ativa") !== "ativa" &&
-      ["funcionario", "modelo", "dia"].includes(kind)
+      ["funcionario", "modelo", "dia", "regra", "feriado"].includes(kind)
     ) {
       notify(
         "Esta empresa está em consulta. Reative-a antes de alterar funcionários ou escalas.",
@@ -1136,23 +1413,29 @@ export default function Workspace() {
       setActiveDate((row as Day).data);
     }
     let targetRow = row as Record<string, unknown> | undefined;
-    if (kind === "modelo" && companyScopeId) {
+    if (["modelo", "regra", "feriado"].includes(kind) && companyScopeId) {
+      if (targetRow?.empresa_id && targetRow.empresa_id !== companyScopeId) {
+        notify("O registro pertence a outra empresa.", true);
+        return;
+      }
       if (targetRow && !targetRow.empresa_id) {
         const { id: templateId, ...template } = targetRow;
         void templateId;
         targetRow = {
           ...template,
-          nome: `${template.nome} · ${scopedCompany?.nome}`,
+          nome:
+            kind === "modelo"
+              ? `${template.nome} · ${scopedCompany?.nome}`
+              : template.nome,
           empresa_id: companyScopeId,
         };
-      } else if (!targetRow) targetRow = { empresa_id: companyScopeId };
-    }
-    if (kind === "feriado" && companyScopeId) {
-      notify(
-        "O cadastro legal é compartilhado. Use o calendário global para editar a data oficial; isso não define o funcionamento da empresa.",
-        true,
-      );
-      return;
+      } else if (!targetRow)
+        targetRow = {
+          empresa_id: companyScopeId,
+          ...(kind === "feriado"
+            ? { uf: scopedCompany?.uf, cidade: scopedCompany?.cidade }
+            : {}),
+        };
     }
     setModal({ kind, row: targetRow });
   };
@@ -1164,13 +1447,21 @@ export default function Workspace() {
     cell?.focus({ preventScroll: true });
     edit("dia", day);
   };
-  const navigate = (target: Page) =>
+  const navigate = (target: Page) => {
+    if (scopedCompany && target !== "empresas") {
+      openCompany(
+        scopedCompany,
+        target === "inicio" ? "visao_geral" : (target as CompanyView),
+      );
+      return;
+    }
     changeContext(() => {
       setPage(target);
       setCompanyScopeId(null);
       setDetailEmployeeId(null);
       setMobile(false);
     });
+  };
   const openCompany = (target: Company, view: CompanyView = "visao_geral") =>
     changeContext(() => {
       setCompanyScopeId(target.id);
@@ -1211,6 +1502,38 @@ export default function Workspace() {
       setPage("escalas");
     });
   };
+  const employeeTimesheet = (person: Employee) => {
+    const target = data.companies.find(
+      (entry) => entry.id === person.empresa_id,
+    );
+    const selected = data.schedules.find(
+      (entry) =>
+        entry.empresa_id === person.empresa_id &&
+        entry.funcionario_id === person.id &&
+        entry.mes.startsWith(month),
+    );
+    if (
+      !target ||
+      !selected ||
+      (companyScopeId && companyScopeId !== target.id)
+    ) {
+      notify(
+        "Nenhuma escala desta empresa e funcionário está salva nesta competência.",
+        true,
+      );
+      return;
+    }
+    changeContext(() => {
+      setCompanyScopeId(target.id);
+      setCompanyId(target.id);
+      setEmployeeId(person.id);
+      setScheduleView("individual");
+      setPage("escalas");
+      void perform(async () => {
+        await exportTimesheetPDF(selected, target, person);
+      });
+    });
+  };
   const currentCompanyView: CompanyView =
     page === "company-settings"
       ? "configuracoes"
@@ -1220,6 +1543,7 @@ export default function Workspace() {
             "escalas",
             "feriados",
             "historico",
+            "regras",
           ].includes(page)
         ? (page as CompanyView)
         : "visao_geral";
@@ -1299,7 +1623,7 @@ export default function Workspace() {
           await rowSave(
             "funcionarios",
             {
-              ...person,
+              empresa_id: person.empresa_id,
               situacao: person.situacao === "inativo" ? "ativo" : "inativo",
             },
             person.id,
@@ -1308,7 +1632,7 @@ export default function Workspace() {
         });
       },
     });
-  if (!authReady)
+  if (!authReady || !navigationReady)
     return (
       <div className="min-h-screen grid place-items-center">
         <LoaderCircle className="animate-spin" aria-label="Carregando" />
@@ -1446,6 +1770,8 @@ export default function Workspace() {
                     hasMore: false,
                   });
                   setData(demoData());
+                  setDataLoaded(true);
+                  setDataLoadError(null);
                   setScheduleView("individual");
                   setMonth("2026-12");
                   setDemo(true);
@@ -1493,6 +1819,62 @@ export default function Workspace() {
         )}
       </div>
     );
+  if (dataLoading || !dataLoaded)
+    return (
+      <div className="min-h-screen grid place-items-center" role="status">
+        <LoaderCircle
+          className="animate-spin"
+          aria-label="Carregando dados da empresa"
+        />
+      </div>
+    );
+  if (dataLoadError && !demo)
+    return (
+      <main className="min-h-screen grid place-items-center p-6">
+        <section className="panel max-w-lg p-6" role="alert">
+          <h1>Não foi possível carregar os dados</h1>
+          <p className="subtitle">
+            O carregamento falhou. Tente novamente ou retorne à lista de
+            empresas.
+          </p>
+          <div className="actions mt-5">
+            <button
+              className="button primary"
+              onClick={() => setLoadAttempt((attempt) => attempt + 1)}
+            >
+              Tentar novamente
+            </button>
+            <button
+              className="button"
+              onClick={() => {
+                navigate("empresas");
+                setLoadAttempt((attempt) => attempt + 1);
+              }}
+            >
+              Todas as empresas
+            </button>
+          </div>
+        </section>
+      </main>
+    );
+  if (companyScopeId && !scopedCompany)
+    return (
+      <main className="min-h-screen grid place-items-center p-6">
+        <section className="panel max-w-lg p-6">
+          <h1>Empresa não disponível</h1>
+          <p className="subtitle">
+            A empresa solicitada não está disponível para esta conta. Nenhum
+            outro ambiente foi aberto.
+          </p>
+          <button
+            className="button primary mt-5"
+            onClick={() => navigate("empresas")}
+          >
+            Todas as empresas
+          </button>
+        </section>
+      </main>
+    );
   return (
     <div className="shell">
       {mobile && (
@@ -1503,7 +1885,9 @@ export default function Workspace() {
       )}
       <aside className={`sidebar ${mobile ? "open" : ""}`}>
         <Brand light />
-        <div className="nav-label">ÁREA DE TRABALHO</div>
+        <div className="nav-label">
+          {companyScopeId ? "ADMINISTRAÇÃO DA EMPRESA" : "ÁREA GERAL"}
+        </div>
         {nav.slice(0, 5).map(([id, label, Icon]) => (
           <button
             key={id}
@@ -1576,6 +1960,7 @@ export default function Workspace() {
                 setDraft(null);
                 setDirty(false);
                 setPage("inicio");
+                window.history.replaceState(null, "", "/");
               })
             }
           >
@@ -1606,6 +1991,7 @@ export default function Workspace() {
               Empresa ativa
               <select
                 aria-label="Empresa ativa"
+                disabled={busy}
                 value={companyScopeId ?? ""}
                 onChange={(event) => {
                   const target = data.companies.find(
@@ -2058,6 +2444,7 @@ export default function Workspace() {
                                 }
                               >
                                 {m.nome}
+                                {!m.empresa_id ? " · referência legada" : ""}
                                 {m.tipo === "6x1" && !company?.permite_6x1
                                   ? " — não autorizado pela empresa"
                                   : ""}
@@ -2116,6 +2503,7 @@ export default function Workspace() {
                           onClick={() =>
                             perform(async () => {
                               if (!employee || !model) return;
+                              const expected = activeDataContext.current;
                               if (
                                 dirty &&
                                 !window.confirm(
@@ -2123,12 +2511,14 @@ export default function Workspace() {
                                 )
                               )
                                 return;
-                              const s = createSchedule(employee, model, month);
+                              const owned = await ownModel(model);
+                              assertDataContext(expected);
+                              const s = createSchedule(employee, owned, month);
                               setDraft(s);
                               setDirty(true);
                               setSaveState("idle");
                               notify(
-                                "Prévia gerada. Confira as semanas, os alertas e salve a escala.",
+                                `${!model.empresa_id ? "Modelo-base copiado para esta empresa. " : ""}Prévia gerada. Confira as semanas, os alertas e salve a escala.`,
                               );
                             })
                           }
@@ -2144,7 +2534,7 @@ export default function Workspace() {
                       <Empty
                         text="Selecione empresa, funcionário, modelo e mês para gerar uma prévia."
                         action={
-                          !data.rules.length ? (
+                          !scheduleRules.length ? (
                             <button
                               className="button"
                               onClick={() => navigate("regras")}
@@ -2199,7 +2589,7 @@ export default function Workspace() {
                                   if (company)
                                     await exportPDF(
                                       schedule,
-                                      data.rules,
+                                      scheduleRules,
                                       company,
                                       employee,
                                     );
@@ -2236,7 +2626,7 @@ export default function Workspace() {
                                   if (company)
                                     await exportExcel(
                                       schedule,
-                                      data.rules,
+                                      scheduleRules,
                                       company,
                                       data.employees.find(
                                         (e) => e.id === schedule.funcionario_id,
@@ -2254,7 +2644,7 @@ export default function Workspace() {
                               onClick={() =>
                                 exportCSV(
                                   schedule,
-                                  data.rules,
+                                  scheduleRules,
                                   data.employees.find(
                                     (e) => e.id === schedule.funcionario_id,
                                   ),
@@ -2338,9 +2728,9 @@ export default function Workspace() {
                                   aria-selected={activeDate === d.data}
                                   role="gridcell"
                                   disabled={scheduleReadOnly}
-                                  className={`day ${computeDay(d, data.rules, schedule.dias).worked === 0 ? "rest" : ""} ${problem ? `has-${problem}` : ""} ${activeDate === d.data ? "selected" : ""}`}
+                                  className={`day ${computeDay(d, scheduleRules, schedule.dias).worked === 0 ? "rest" : ""} ${problem ? `has-${problem}` : ""} ${activeDate === d.data ? "selected" : ""}`}
                                   onClick={() => edit("dia", d)}
-                                  aria-label={`${dateLabel(d.data)}${violations.length ? `, ${violations.length} violações impeditivas` : attention.length ? `, ${attention.length} avisos` : ""}: ${d.intervalos.length ? shiftText(d.intervalos) : computeDay(d, data.rules, schedule.dias).worked > 0 ? "Continuação do turno anterior" : "Folga"}. Editar.`}
+                                  aria-label={`${dateLabel(d.data)}${violations.length ? `, ${violations.length} violações impeditivas` : attention.length ? `, ${attention.length} avisos` : ""}: ${d.intervalos.length ? shiftText(d.intervalos) : computeDay(d, scheduleRules, schedule.dias).worked > 0 ? "Continuação do turno anterior" : "Folga"}. Editar.`}
                                 >
                                   <span className="day-number">
                                     <span className="desktop-day">
@@ -2370,7 +2760,7 @@ export default function Workspace() {
                                         {formatMinutes(
                                           computeDay(
                                             d,
-                                            data.rules,
+                                            scheduleRules,
                                             schedule.dias,
                                           ).computed,
                                         )}
@@ -2378,15 +2768,18 @@ export default function Workspace() {
                                     </>
                                   ) : (
                                     <span className="rest-label">
-                                      {computeDay(d, data.rules, schedule.dias)
-                                        .worked > 0 ? (
+                                      {computeDay(
+                                        d,
+                                        scheduleRules,
+                                        schedule.dias,
+                                      ).worked > 0 ? (
                                         <>
                                           Continuação
                                           <br />
                                           {formatMinutes(
                                             computeDay(
                                               d,
-                                              data.rules,
+                                              scheduleRules,
                                               schedule.dias,
                                             ).computed,
                                           )}
@@ -2461,7 +2854,7 @@ export default function Workspace() {
                             schedule.dias.filter(
                               (d) =>
                                 d.data.startsWith(month) &&
-                                computeDay(d, data.rules, schedule.dias)
+                                computeDay(d, scheduleRules, schedule.dias)
                                   .worked > 0,
                             ).length
                           }
@@ -2680,6 +3073,7 @@ export default function Workspace() {
               onEdit={(e) => edit("funcionario", e)}
               onOpen={openEmployee}
               onSchedules={employeeSchedules}
+              onTimesheet={employeeTimesheet}
               onToggleStatus={toggleEmployeeStatus}
             />
           )}
@@ -2691,10 +3085,43 @@ export default function Workspace() {
               month={month}
               onEdit={(e) => edit("funcionario", e)}
               onSchedules={employeeSchedules}
+              onTimesheet={employeeTimesheet}
               onClose={() => setPage("funcionarios")}
             />
           )}
-          {page === "modelos" && (
+          {page === "employee-detail" && scopedCompany && !detailEmployee && (
+            <section className="panel">
+              <Empty
+                text="Funcionário não disponível nesta empresa."
+                action={
+                  <button
+                    className="button"
+                    onClick={() => setPage("funcionarios")}
+                  >
+                    Voltar aos funcionários
+                  </button>
+                }
+              />
+            </section>
+          )}
+          {scopedCompany &&
+            ["modelos", "feriados", "regras"].includes(page) && (
+              <CompanyResources
+                company={scopedCompany}
+                data={data}
+                tab={page as "modelos" | "feriados" | "regras"}
+                busy={busy}
+                onEdit={edit}
+                onDeleteModel={deleteModel}
+                onCopyModelText={(model) =>
+                  void perform(async () => {
+                    await navigator.clipboard.writeText(dominioText(model));
+                    notify("Horário copiado para colar no Domínio.");
+                  })
+                }
+              />
+            )}
+          {page === "modelos" && !companyScopeId && (
             <>
               <div className="page-head">
                 <div>
@@ -2773,7 +3200,7 @@ export default function Workspace() {
               </div>
             </>
           )}
-          {page === "feriados" && (
+          {page === "feriados" && !companyScopeId && (
             <>
               {scopedCompany && (
                 <div className="banner neutral">
@@ -2903,7 +3330,7 @@ export default function Workspace() {
               </section>
             </>
           )}
-          {page === "regras" && (
+          {page === "regras" && !companyScopeId && (
             <>
               <div className="page-head">
                 <div>

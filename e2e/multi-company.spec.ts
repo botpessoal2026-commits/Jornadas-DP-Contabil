@@ -49,6 +49,21 @@ async function confirm(page: Page) {
   await expect(page.getByRole("dialog")).not.toBeVisible();
 }
 
+async function copyBaseModel(page: Page, baseName: string, ownName: string) {
+  await tab(page, "Jornadas e modelos");
+  await page
+    .getByRole("region", { name: "Biblioteca de modelos-base", exact: true })
+    .locator(".panel")
+    .filter({ has: page.getByRole("heading", { name: baseName, exact: true }) })
+    .getByRole("button", { name: "Personalizar nesta empresa", exact: true })
+    .click();
+  await page
+    .getByRole("dialog")
+    .getByLabel("Nome do modelo", { exact: true })
+    .fill(ownName);
+  await saveForm(page);
+}
+
 // Context switching exercises actual UI state; persistence/RLS is covered in SQL tests.
 test("cada administração mostra somente seus vínculos ao trocar a empresa ativa", async ({
   page,
@@ -92,7 +107,11 @@ test("empresa mínima aceita CNPJ vazio e funcionário novo fica no vínculo con
     .getByLabel("Nome da empresa / razão social", { exact: true })
     .fill("Empresa Nova sem CNPJ");
   await saveForm(page);
-  await enterCompany(page, "Empresa Nova sem CNPJ");
+  await expect(
+    page.getByRole("region", { name: "Empresa em administração", exact: true }),
+  ).toContainText("Empresa Nova sem CNPJ");
+  const ownModel = "Modelo próprio da empresa nova";
+  await copyBaseModel(page, "5×2 · 42h · seg a sex", ownModel);
   await tab(page, "Funcionários");
   await page
     .getByRole("button", { name: "Adicionar funcionário", exact: true })
@@ -122,12 +141,12 @@ test("empresa mínima aceita CNPJ vazio e funcionário novo fica no vínculo con
   await dialog
     .getByRole("spinbutton", { name: "Carga semanal contratual (horas)" })
     .fill("30");
-  await dialog
-    .getByRole("combobox", {
-      name: "Modelo individual de jornada",
-      exact: true,
-    })
-    .selectOption("demo-model-0");
+  const selectedModel = dialog.getByRole("combobox", {
+    name: "Modelo individual de jornada",
+    exact: true,
+  });
+  await selectedModel.selectOption({ label: ownModel });
+  const modelId = await selectedModel.inputValue();
   await saveForm(page);
   const card = page
     .locator(".employee-card")
@@ -144,7 +163,7 @@ test("empresa mínima aceita CNPJ vazio e funcionário novo fica no vínculo con
       name: "Modelo individual de jornada",
       exact: true,
     }),
-  ).toHaveValue("demo-model-0");
+  ).toHaveValue(modelId);
   await dialog.getByRole("button", { name: "Cancelar", exact: true }).click();
   await card
     .getByRole("button", { name: "Visualizar funcionário", exact: true })
@@ -166,19 +185,22 @@ test("modelo individual continua prioritário quando o padrão empresarial muda"
 }) => {
   await start(page);
   await enterCompany(page);
+  const individualName = "Modelo individual próprio Aurora";
+  const companyName = "Modelo empresarial próprio Aurora";
+  await copyBaseModel(page, "5×2 · 42h · seg a sex", individualName);
+  await copyBaseModel(page, "5×2 · 4 dias de 8h + 1 de 10h", companyName);
   await tab(page, "Funcionários");
   await page
     .locator(".employee-card")
     .filter({ hasText: "Mariana Costa" })
     .getByRole("button", { name: "Editar funcionário", exact: true })
     .click();
-  await page
-    .getByRole("dialog")
-    .getByRole("combobox", {
-      name: "Modelo individual de jornada",
-      exact: true,
-    })
-    .selectOption("demo-model-0");
+  const individualModel = page.getByRole("dialog").getByRole("combobox", {
+    name: "Modelo individual de jornada",
+    exact: true,
+  });
+  await individualModel.selectOption({ label: individualName });
+  const individualId = await individualModel.inputValue();
   await saveForm(page);
   await tab(page, "Configurações");
   await page
@@ -187,19 +209,19 @@ test("modelo individual continua prioritário quando o padrão empresarial muda"
   await page
     .getByRole("dialog")
     .getByRole("combobox", { name: "Modelo padrão da empresa", exact: true })
-    .selectOption("demo-model-1");
+    .selectOption({ label: companyName });
   await saveForm(page);
   await tab(page, "Funcionários");
   const person = page
     .locator(".employee-card")
     .filter({ hasText: "Mariana Costa" });
-  await expect(person).toContainText("5×2 · 42h · seg a sex · individual");
+  await expect(person).toContainText(`${individualName} · individual`);
   await person
     .getByRole("button", { name: "Gerenciar escalas", exact: true })
     .click();
   await expect(
     page.getByRole("combobox", { name: "Modelo de jornada", exact: true }),
-  ).toHaveValue("demo-model-0");
+  ).toHaveValue(individualId);
   // Cadastro padrão não reescreve a competência que já foi salva.
   await expect(page.locator('[data-date="2026-12-01"]')).toContainText("17:24");
   await expect(
@@ -297,12 +319,18 @@ test("personalizar referência compartilhada cria modelo próprio sem editar a o
   await start(page);
   await enterCompany(page);
   await tab(page, "Jornadas e modelos");
-  const reference = page.locator("section.panel").filter({
-    has: page.getByRole("heading", {
-      name: "5×2 · 42h · seg a sex",
+  const reference = page
+    .getByRole("region", {
+      name: "Biblioteca de modelos-base",
       exact: true,
-    }),
-  });
+    })
+    .locator(".panel")
+    .filter({
+      has: page.getByRole("heading", {
+        name: "5×2 · 42h · seg a sex",
+        exact: true,
+      }),
+    });
   await reference
     .getByRole("button", { name: "Personalizar nesta empresa", exact: true })
     .click();
@@ -449,27 +477,35 @@ test("feriados oficiais da empresa seguem localização sem alterar cadastro com
   await tab(page, "Feriados");
   await expect(
     page.getByRole("cell", {
-      name: "Data Magna de Pernambuco — conferir calendário local",
+      name: "Data Magna de Pernambuco — conferir calendário local Referência geral",
       exact: true,
     }),
   ).toBeVisible();
+  const general = page.getByRole("region", {
+    name: "Referências gerais de feriados",
+    exact: true,
+  });
+  await expect(
+    general.getByRole("button", { name: "Editar", exact: true }),
+  ).toHaveCount(0);
   expect(
-    await page
-      .getByRole("button", { name: "Editar", exact: true })
-      .evaluateAll((buttons) =>
-        buttons.every((button) => (button as HTMLButtonElement).disabled),
-      ),
-  ).toBe(true);
+    await general
+      .getByRole("button", { name: "Personalizar nesta empresa", exact: true })
+      .count(),
+  ).toBeGreaterThan(0);
+  await expect(
+    page.getByRole("button", { name: "Novo feriado", exact: true }),
+  ).toBeEnabled();
   await page
     .getByRole("combobox", { name: "Empresa ativa", exact: true })
     .selectOption(betaId);
   await expect(
     page.getByRole("cell", {
-      name: "Data Magna de Pernambuco — conferir calendário local",
+      name: "Data Magna de Pernambuco — conferir calendário local Referência geral",
       exact: true,
     }),
   ).not.toBeVisible();
   await expect(
-    page.getByRole("cell", { name: "Natal", exact: true }),
+    page.getByRole("cell", { name: "Natal Referência geral", exact: true }),
   ).toBeVisible();
 });

@@ -1,10 +1,12 @@
 import type { Company, Employee, LegalRule, Schedule } from "./types";
 import { computeDay, evaluate, formatMinutes, span } from "./engine";
+import { rulesForCompany } from "./company-resources";
 export function exportRows(
   schedule: Schedule,
   rules: LegalRule[],
   employee?: Employee,
 ) {
+  rules = rulesForCompany(rules, schedule.empresa_id);
   return schedule.dias
     .filter((d) => d.data.startsWith(schedule.mes.slice(0, 7)))
     .map((d) => ({
