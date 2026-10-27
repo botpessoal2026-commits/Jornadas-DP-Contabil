@@ -1,4 +1,61 @@
 @import "tailwindcss";
+
+/* Date natures use soft fills; existing alert borders remain independent. */
+.calendar .day[data-day-kind="feriado"],
+.calendar .day[data-day-kind="feriado_trabalhado"],
+.team-table .team-day[data-day-kind="feriado"],
+.team-table .team-day[data-day-kind="feriado_trabalhado"] {
+  background-color: #f7f0ff;
+}
+.calendar .day[data-day-kind="ponto_facultativo"],
+.team-table .team-day[data-day-kind="ponto_facultativo"] {
+  background-color: #edf7ff;
+}
+.calendar .day[data-day-kind="recesso"],
+.team-table .team-day[data-day-kind="recesso"] {
+  background-color: #edf8f1;
+}
+.calendar .day[data-day-kind="sem_expediente"],
+.team-table .team-day[data-day-kind="sem_expediente"] {
+  background-color: #edf0f4;
+}
+.day .day-event-label {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-top: 6px;
+  font-size: 10px;
+  line-height: 1.4;
+  color: #344b65;
+}
+.day .day-individual {
+  display: block;
+  font-size: 9px;
+  line-height: 1.4;
+  margin-top: 5px;
+  color: #365d87;
+}
+.special-legend {
+  padding: 3px 7px;
+  border-radius: 5px;
+  color: #344b65;
+}
+.special-legend.holiday {
+  background: #f7f0ff;
+}
+.special-legend.optional {
+  background: #edf7ff;
+}
+.special-legend.recess {
+  background: #edf8f1;
+}
+.special-legend.closed {
+  background: #edf0f4;
+}
+.calendar-totals {
+  margin-top: 18px;
+  margin-bottom: 18px;
+}
 :root {
   --ink: #152d47;
   --muted: #5d7085;

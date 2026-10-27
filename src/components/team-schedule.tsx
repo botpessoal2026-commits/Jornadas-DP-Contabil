@@ -166,6 +166,7 @@ export default function TeamSchedule({
                       <td
                         key={day.date}
                         data-team-date={day.date}
+                        data-day-kind={day.dayKind}
                         data-problem={day.problem ?? undefined}
                         className={`team-day ${day.state} ${day.problem ? `has-${day.problem}` : ""}`}
                       >
@@ -199,8 +200,10 @@ export default function TeamSchedule({
                             <strong className="team-hours">{day.hours}</strong>
                           </>
                         )}
-                        {day.holiday && (
-                          <span className="team-holiday">{day.holiday}</span>
+                        {(day.eventLabel || day.holiday) && (
+                          <span className="team-holiday">
+                            {day.eventLabel || day.holiday}
+                          </span>
                         )}
                       </td>
                     ))}

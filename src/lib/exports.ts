@@ -1,38 +1,67 @@
 import type { Company, Employee, LegalRule, Schedule } from "./types";
 import { computeDay, evaluate, formatMinutes, span } from "./engine";
 import { rulesForCompany } from "./company-resources";
+import { dayPresentation, specialDateTotals } from "./special-dates";
 export function exportRows(
   schedule: Schedule,
   rules: LegalRule[],
   employee?: Employee,
+  company?: Company,
 ) {
   rules = rulesForCompany(rules, schedule.empresa_id);
   return schedule.dias
     .filter((d) => d.data.startsWith(schedule.mes.slice(0, 7)))
-    .map((d) => ({
-      Data: d.data,
-      "Carga contratual semanal": employee?.carga_semanal_minutos
-        ? formatMinutes(employee.carga_semanal_minutos)
-        : "Pendente de revisão",
-      Horário:
-        d.intervalos
-          .map(
-            (s) =>
-              `${s.start}–${s.end}${span(s)[1] >= 1440 ? " (+1 dia)" : ""}`,
-          )
-          .join(" / ") ||
-        (computeDay(d, rules, schedule.dias).worked > 0
-          ? "Continuação do turno anterior"
-          : "Folga"),
-      Feriado: d.feriado ?? "",
-      "Horas relógio": formatMinutes(
-        computeDay(d, rules, schedule.dias).worked,
-      ),
-      "Horas computadas": formatMinutes(
-        computeDay(d, rules, schedule.dias).computed,
-      ),
-      Observação: d.observacao,
-    }));
+    .map((d) => {
+      const presentation = dayPresentation(d, schedule.dias);
+      const hours = computeDay(d, rules, schedule.dias);
+      return {
+        Data: d.data,
+        "Carga contratual semanal": employee?.carga_semanal_minutos
+          ? formatMinutes(employee.carga_semanal_minutos)
+          : "Pendente de revisão",
+        Horário:
+          d.intervalos
+            .map(
+              (s) =>
+                `${s.start}–${s.end}${span(s)[1] >= 1440 ? " (+1 dia)" : ""}`,
+            )
+            .join(" / ") ||
+          (hours.worked > 0
+            ? "Continuação do turno anterior"
+            : !d.eventos?.length && !d.calendario?.excecao
+              ? "Folga"
+              : presentation.kind === "folga"
+                ? "Folga"
+                : "Sem expediente"),
+        Feriado: d.feriado ?? "",
+        "Horas relógio": formatMinutes(hours.worked),
+        "Horas computadas": formatMinutes(hours.computed),
+        Observação: d.observacao,
+        Empresa: company?.nome ?? schedule.empresa_id,
+        Funcionário:
+          employee?.nome ?? schedule.nome_funcionario ?? "Não informado",
+        "Tipo do dia": presentation.label,
+        Evento: presentation.names.length ? presentation.description : "",
+        "Situação do expediente": presentation.status,
+        "Horas programadas": formatMinutes(hours.worked),
+        "Horas programadas em feriados": formatMinutes(
+          presentation.isHoliday ? hours.worked : 0,
+        ),
+      };
+    });
+}
+function calendarSummary(schedule: Schedule, rules: LegalRule[]) {
+  const totals = specialDateTotals(schedule, rules);
+  return [
+    ["Dias de trabalho", String(totals.workDays)],
+    ["Dias de folga/sem jornada", String(totals.restDays)],
+    ["Feriados", String(totals.holidays)],
+    ["Feriados trabalhados", String(totals.workingHolidays)],
+    ["Horas programadas em feriados", formatMinutes(totals.holidayMinutes)],
+    ["Pontos facultativos", String(totals.optionalDays)],
+    ["Dias de recesso", String(totals.recessDays)],
+    ["Outros dias sem expediente", String(totals.noWorkDays)],
+  ];
 }
 function download(blob: Blob, name: string) {
   const a = document.createElement("a");
@@ -55,9 +84,10 @@ export function exportCSV(
   s: Schedule,
   rules: LegalRule[],
   employee?: Employee,
+  company?: Company,
 ) {
   download(
-    new Blob([csvText(exportRows(s, rules, employee))], {
+    new Blob([csvText(exportRows(s, rules, employee, company))], {
       type: "text/csv;charset=utf-8",
     }),
     `escala-${s.mes.slice(0, 7)}.csv`,
@@ -73,7 +103,7 @@ export async function excelBuffer(
   const book = new ExcelJS.Workbook();
   book.creator = "Cont Contábil · Gerador de Jornadas";
   const sheet = book.addWorksheet("Escala");
-  const rows = exportRows(s, rules, employee);
+  const rows = exportRows(s, rules, employee, company);
   sheet.columns = Object.keys(rows[0] ?? {}).map((key) => ({
     header: key,
     key,
@@ -102,6 +132,7 @@ export async function excelBuffer(
   summary.addRow(["Mês", s.mes.slice(0, 7)]);
   summary.addRow(["Horas computadas", formatMinutes(result.total)]);
   summary.addRow(["Horas de relógio", formatMinutes(result.clockTotal)]);
+  calendarSummary(s, rules).forEach((row) => summary.addRow(row));
   summary.addRow(["Período", "Regime", "Divisor", "Fonte"]);
   for (const p of result.periods)
     summary.addRow([
@@ -157,15 +188,15 @@ export async function pdfDocument(
     14,
     32,
   );
-  const rows = exportRows(s, rules, employee);
+  const rows = exportRows(s, rules, employee, company);
   autoTable(doc, {
     startY: 38,
-    head: [["Data", "Horário", "Horas", "Feriado"]],
+    head: [["Data", "Horário", "Horas", "Feriado / evento"]],
     body: rows.map((r) => [
       r.Data,
-      r.Horário,
+      `${r.Horário}\n${r["Tipo do dia"]} · ${r["Situação do expediente"]}`,
       r["Horas computadas"],
-      r.Feriado,
+      r.Evento || r.Feriado,
     ]),
     styles: { fontSize: 8 },
     headStyles: { fillColor: [10, 57, 116] },
@@ -178,6 +209,18 @@ export async function pdfDocument(
   );
   autoTable(doc, {
     startY: 25,
+    head: [["Calendário programado", "Quantidade / horas de relógio"]],
+    body: calendarSummary(s, rules),
+    styles: { fontSize: 8 },
+    headStyles: { fillColor: [10, 57, 116] },
+  });
+  const calendarTable = (
+    doc as typeof doc & {
+      lastAutoTable?: { finalY: number };
+    }
+  ).lastAutoTable;
+  autoTable(doc, {
+    startY: (calendarTable?.finalY ?? 85) + 6,
     head: [["Vigência", "Regime / divisor", "Fonte"]],
     body: result.periods.map((p) => [
       `${p.start} a ${p.end}`,
@@ -199,7 +242,7 @@ export async function pdfDocument(
   doc.addPage();
   doc.text("Conferência e assinaturas", 14, 22);
   doc.text(
-    "A escala depende da conferência dos parâmetros legais e da CCT aplicável.",
+    "A escala depende da conferência dos parâmetros legais e do instrumento aplicável.",
     14,
     34,
   );

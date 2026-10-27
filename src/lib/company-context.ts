@@ -1,6 +1,5 @@
 import { buildAlertSummary } from "./alerts";
 import { scheduleRegime } from "./work-regime";
-import { validationDays } from "./schedule-context";
 import { evaluate, holidayAt } from "./engine";
 import {
   holidaysForCompany,
@@ -9,6 +8,7 @@ import {
 } from "./company-resources";
 import type { Data } from "./store";
 import type { Company, Employee, Model } from "./types";
+import { projectData } from "./special-dates";
 
 export type CompanySituation = "ativa" | "inativa" | "arquivada";
 export type CompanyView =
@@ -70,6 +70,8 @@ export function scopeCompanyData(data: Data, companyId: string): Data {
       holidays: [],
       logs: [],
       rules: [],
+      specialDates: [],
+      establishments: [],
     };
   const employees = data.employees.filter(
     (entry) => entry.empresa_id === companyId,
@@ -78,6 +80,12 @@ export function scopeCompanyData(data: Data, companyId: string): Data {
   return {
     ...data,
     companies: [company],
+    specialDates: (data.specialDates ?? []).filter(
+      (event) => event.empresa_id === companyId,
+    ),
+    establishments: (data.establishments ?? []).filter(
+      (unit) => unit.empresa_id === companyId,
+    ),
     employees,
     models: data.models.filter((entry) => entry.empresa_id === companyId),
     rules: rulesForCompany(data.rules, companyId),
@@ -85,8 +93,20 @@ export function scopeCompanyData(data: Data, companyId: string): Data {
       (entry) =>
         entry.empresa_id === companyId && employeeIds.has(entry.funcionario_id),
     ),
-    holidays: holidaysForCompany(data.holidays, companyId).filter((holiday) =>
-      Boolean(holidayAt(holiday.data, [holiday], company)),
+    holidays: holidaysForCompany(data.holidays, companyId).filter(
+      (holiday) =>
+        Boolean(holidayAt(holiday.data, [holiday], company)) ||
+        (data.establishments ?? []).some(
+          (unit) =>
+            unit.empresa_id === companyId &&
+            Boolean(
+              holidayAt(holiday.data, [holiday], {
+                ...company,
+                cidade: unit.cidade,
+                uf: unit.uf,
+              }),
+            ),
+        ),
     ),
     // Old events without a reliable company stay in the global history only.
     logs: data.logs.filter(
@@ -141,6 +161,7 @@ export function resolveEmployeeModel(
 }
 
 export function companySummary(data: Data, company: Company, month: string) {
+  data = projectData(data);
   const scoped = scopeCompanyData(data, company.id);
   const active = scoped.employees.filter(
     (employee) => employee.situacao !== "inativo",
@@ -161,7 +182,7 @@ export function companySummary(data: Data, company: Company, month: string) {
     );
     try {
       const report = evaluate(
-        validationDays(schedule, scoped.schedules),
+        schedule.dias,
         scoped.rules,
         company,
         schedule.mes,

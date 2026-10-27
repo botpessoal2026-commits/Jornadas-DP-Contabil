@@ -2,10 +2,12 @@ import { supabase } from "./supabase";
 import type {
   Company,
   Employee,
+  Establishment,
   Holiday,
   LegalRule,
   Model,
   Schedule,
+  SpecialDate,
 } from "./types";
 import { initialHolidays, initialModels, initialRules } from "./presets";
 export type AuditLog = {
@@ -28,6 +30,8 @@ export type Data = {
   holidays: Holiday[];
   schedules: Schedule[];
   logs: AuditLog[];
+  specialDates?: SpecialDate[];
+  establishments?: Establishment[];
 };
 export const emptyData: Data = {
   companies: [],
@@ -37,6 +41,8 @@ export const emptyData: Data = {
   holidays: [],
   schedules: [],
   logs: [],
+  specialDates: [],
+  establishments: [],
 };
 export async function loadData(companyId?: string | null): Promise<Data> {
   if (!supabase) throw new Error("Configure o Supabase.");
@@ -63,6 +69,8 @@ export async function loadData(companyId?: string | null): Promise<Data> {
     "feriados",
     "escalas",
     "log_alteracoes",
+    "datas_especiais",
+    "estabelecimentos",
   ];
   const responses = await Promise.all(
     tables.map((t) => {
@@ -72,7 +80,7 @@ export async function loadData(companyId?: string | null): Promise<Data> {
           ? supabase!
               .from(t)
               .select(
-                "*,dias:escala_dias(data,intervalos,folga,feriado,observacao)",
+                "*,dias:escala_dias(data,intervalos,folga,feriado,observacao,calendario)",
               )
           : t === "log_alteracoes"
             ? supabase!
@@ -84,7 +92,15 @@ export async function loadData(companyId?: string | null): Promise<Data> {
                 .limit(100)
             : supabase!.from(t).select("*");
       if (companyId) {
-        if (["funcionarios", "escalas", "log_alteracoes"].includes(t))
+        if (
+          [
+            "funcionarios",
+            "escalas",
+            "log_alteracoes",
+            "datas_especiais",
+            "estabelecimentos",
+          ].includes(t)
+        )
           query = query.eq("empresa_id", companyId);
         else if (
           ["modelos_jornada", "parametros_legais", "feriados"].includes(t)
@@ -131,6 +147,14 @@ export async function deleteCompanyModel(companyId: string, modelId: string) {
   const { error } = await supabase.rpc("excluir_modelo_empresa", {
     p_empresa: companyId,
     p_modelo: modelId,
+  });
+  if (error) throw new Error(error.message);
+}
+export async function deleteCompanySpecialDate(companyId: string, id: string) {
+  if (!supabase) throw new Error("Supabase não configurado.");
+  const { error } = await supabase.rpc("excluir_data_especial", {
+    p_empresa: companyId,
+    p_id: id,
   });
   if (error) throw new Error(error.message);
 }

@@ -1,5 +1,6 @@
 import { addDays, computeDay, dateUTC, monthDates, span } from "./engine";
 import { validateShiftText, shiftEditorText } from "./shift-editor";
+import { dayPresentation } from "./special-dates";
 import type { Company, Employee, Schedule } from "./types";
 
 export type TimesheetRow = {
@@ -84,8 +85,16 @@ export function buildTimesheet(
           : "Dia sem registro na escala",
       };
     const worked = computeDay(day, [], schedule.dias).worked;
+    const presentation = dayPresentation(day, schedule.dias);
     const rest = worked === 0;
-    const holiday = day.feriado?.trim() || null;
+    const holiday =
+      day.feriado?.trim() ||
+      (presentation.isHoliday
+        ? (day.eventos ?? [])
+            .filter((event) => event.categoria.startsWith("feriado_"))
+            .map((event) => event.nome)
+            .join(" · ") || presentation.names.join(" · ")
+        : null);
     const planned = day.intervalos.map((shift) => {
       const [start, end] = span(shift);
       return `${shift.start}${start >= 1440 ? " (+1)" : ""}–${shift.end}${end >= 1440 ? " (+1)" : ""}`;
@@ -101,11 +110,19 @@ export function buildTimesheet(
       shaded: rest || Boolean(holiday),
       crossed: rest,
       observation: [
-        holiday
-          ? `Feriado: ${holiday}${workingHoliday ? " · trabalho previsto" : ""}`
-          : rest
-            ? "Folga"
-            : "",
+        day.eventos?.length || day.calendario?.excecao
+          ? [
+              workingHoliday ? "Feriado trabalhado (previsto)" : "",
+              presentation.description || presentation.label,
+              presentation.status,
+            ]
+              .filter(Boolean)
+              .join(" · ")
+          : holiday
+            ? `Feriado: ${holiday}${workingHoliday ? " · trabalho previsto" : ""}`
+            : rest
+              ? "Folga"
+              : "",
         day.observacao,
       ]
         .filter(Boolean)

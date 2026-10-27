@@ -47,6 +47,7 @@ import {
   saveRow,
   saveCompanyRow,
   deleteCompanyModel,
+  deleteCompanySpecialDate,
   saveSchedules,
   type Data,
 } from "@/lib/store";
@@ -58,7 +59,6 @@ import {
   duplicateDays,
   evaluate,
   formatMinutes,
-  generateDays,
   minutes,
   monthDates,
   span,
@@ -67,6 +67,8 @@ import type {
   Company,
   Day,
   Employee,
+  Establishment,
+  SpecialDate,
   LegalRule,
   Model,
   Schedule,
@@ -109,6 +111,24 @@ import {
 } from "@/lib/exports";
 import Brand from "./brand";
 import TeamSchedule from "./team-schedule";
+import SpecialDates, {
+  SpecialDateFields,
+  EstablishmentFields,
+  EstablishmentsPanel,
+} from "./special-dates";
+import {
+  projectData,
+  projectSchedule,
+  employeeLocation,
+  preserveIndividualExceptions,
+  duplicationBaseDays,
+  generateCalendarDays,
+  mergeGeneratedCalendarPolicy,
+  validateSpecialDate,
+  specialDateIdentity,
+  dayPresentation,
+  specialDateTotals,
+} from "@/lib/special-dates";
 
 type Page =
   | "inicio"
@@ -123,7 +143,15 @@ type Page =
   | "company-settings"
   | "employee-detail";
 type Modal = {
-  kind: "empresa" | "funcionario" | "modelo" | "feriado" | "regra" | "dia";
+  kind:
+    | "empresa"
+    | "funcionario"
+    | "modelo"
+    | "feriado"
+    | "regra"
+    | "dia"
+    | "data_especial"
+    | "estabelecimento";
   row?: Record<string, unknown>;
 };
 const nav = [
@@ -294,7 +322,7 @@ export default function Workspace() {
     [demo, setDemo] = useState(false),
     [authReady, setAuthReady] = useState(false),
     [page, setPage] = useState<Page>("inicio"),
-    [data, setData] = useState<Data>(emptyData),
+    [rawData, setData] = useState<Data>(emptyData),
     [busy, setBusy] = useState(false),
     [mobile, setMobile] = useState(false),
     [toast, setToast] = useState<{ text: string; error?: boolean } | null>(
@@ -304,6 +332,7 @@ export default function Workspace() {
     [authMode, setAuthMode] = useState<
       "login" | "signup" | "reset" | "password"
     >("login");
+  const data = useMemo(() => projectData(rawData), [rawData]);
   const [companyId, setCompanyId] = useState(""),
     [employeeId, setEmployeeId] = useState(""),
     [modelId, setModelId] = useState(""),
@@ -596,13 +625,103 @@ export default function Workspace() {
   const detailEmployee = scopedData.employees.find(
     (e) => e.id === detailEmployeeId,
   );
-  const schedule = draft ?? saved;
+  const scheduleProjection = useMemo(() => {
+    const candidate = draft ?? saved;
+    const person = data.employees.find(
+      (entry) => entry.id === candidate?.funcionario_id,
+    );
+    try {
+      const value =
+        candidate && company && person
+          ? projectSchedule(
+              {
+                ...candidate,
+                dias: validationDays(candidate, rawData.schedules),
+              },
+              company,
+              person,
+              data.specialDates ?? [],
+              data.establishments ?? [],
+              data.holidays,
+            )
+          : candidate;
+      return { value, error: null as string | null };
+    } catch (error) {
+      return {
+        value: candidate,
+        error:
+          error instanceof Error
+            ? error.message
+            : "Confira os eventos e horários deste calendário.",
+      };
+    }
+  }, [
+    draft,
+    saved,
+    company,
+    data.employees,
+    data.specialDates,
+    data.establishments,
+    data.holidays,
+    rawData.schedules,
+  ]);
+  const schedule = scheduleProjection.value;
+  const inheritedDay = useMemo(() => {
+    if (
+      modal?.kind !== "dia" ||
+      !schedule ||
+      !company ||
+      !employee ||
+      scheduleProjection.error
+    )
+      return undefined;
+    const original = modal.row as unknown as Day;
+    const baseline = original.calendario?.base ?? {
+      intervalos: original.intervalos,
+      folga: original.folga,
+      feriado: original.feriado,
+      observacao: original.observacao,
+    };
+    return projectSchedule(
+      {
+        ...schedule,
+        dias: schedule.dias.map((day) =>
+          day.data === original.data
+            ? {
+                ...original,
+                calendario: {
+                  ...original.calendario,
+                  base: baseline,
+                  excecao: null,
+                },
+              }
+            : day,
+        ),
+      },
+      company,
+      employee,
+      data.specialDates ?? [],
+      data.establishments ?? [],
+      data.holidays,
+    ).dias.find((day) => day.data === original.data);
+  }, [
+    modal,
+    schedule,
+    company,
+    employee,
+    data.specialDates,
+    data.establishments,
+    data.holidays,
+    scheduleProjection.error,
+  ]);
   const calculation = useMemo(() => {
+    if (scheduleProjection.error)
+      return { value: null, error: scheduleProjection.error };
     if (!schedule || !company) return { value: null, error: null };
     try {
       return {
         value: evaluate(
-          validationDays(schedule, data.schedules),
+          schedule.dias,
           data.rules,
           company,
           schedule.mes,
@@ -627,8 +746,12 @@ export default function Workspace() {
     data.employees,
     data.models,
     data.schedules,
+    scheduleProjection.error,
   ]);
   const report = calculation.value;
+  const calendarTotals = schedule
+    ? specialDateTotals(schedule, scheduleRules)
+    : null;
   const alertContext = {
     companyId: company?.id ?? "",
     companyName: company?.nome ?? "",
@@ -642,18 +765,29 @@ export default function Workspace() {
       editedDay &&
       schedule &&
       company &&
+      employee &&
       !calculation.error &&
       modal?.kind === "dia"
         ? evaluate(
-            validationDays(
+            projectSchedule(
               {
                 ...schedule,
-                dias: schedule.dias.map((day) =>
-                  day.data === editedDay.data ? editedDay : day,
+                dias: validationDays(
+                  {
+                    ...schedule,
+                    dias: schedule.dias.map((day) =>
+                      day.data === editedDay.data ? editedDay : day,
+                    ),
+                  },
+                  rawData.schedules,
                 ),
               },
-              data.schedules,
-            ),
+              company,
+              employee,
+              data.specialDates ?? [],
+              data.establishments ?? [],
+              data.holidays,
+            ).dias,
             data.rules,
             company,
             schedule.mes,
@@ -665,12 +799,17 @@ export default function Workspace() {
       editedDay,
       schedule,
       company,
+      employee,
       calculation.error,
       modal?.kind,
       data.rules,
       data.employees,
       data.models,
       data.schedules,
+      data.specialDates,
+      data.establishments,
+      data.holidays,
+      rawData.schedules,
     ],
   );
   const editedSummary = buildAlertSummary(
@@ -762,6 +901,8 @@ export default function Workspace() {
         modelos_jornada: "models",
         parametros_legais: "rules",
         feriados: "holidays",
+        datas_especiais: "specialDates",
+        estabelecimentos: "establishments",
       } as const
     )[
       table as
@@ -770,6 +911,8 @@ export default function Workspace() {
         | "modelos_jornada"
         | "parametros_legais"
         | "feriados"
+        | "datas_especiais"
+        | "estabelecimentos"
     ];
     const before = data[key]?.find((r) => r.id === id) as unknown as
       Record<string, unknown> | undefined;
@@ -803,6 +946,8 @@ export default function Workspace() {
         "modelos_jornada",
         "feriados",
         "parametros_legais",
+        "datas_especiais",
+        "estabelecimentos",
       ].includes(table) &&
       targetCompanyId
     ) {
@@ -861,8 +1006,8 @@ export default function Workspace() {
           ({
             ...current,
             [key]: id
-              ? current[key].map((r) => (r.id === id ? after : r))
-              : [...current[key], after],
+              ? (current[key] ?? []).map((r) => (r.id === id ? after : r))
+              : [...(current[key] ?? []), after],
             logs: [
               {
                 id: crypto.randomUUID(),
@@ -939,6 +1084,52 @@ export default function Workspace() {
         }),
     });
   };
+  const deleteSpecialDate = (event: SpecialDate) => {
+    if (
+      !scopedCompany ||
+      event.empresa_id !== scopedCompany.id ||
+      companyReadOnly
+    ) {
+      notify("Selecione uma data da empresa ativa para excluir.", true);
+      return;
+    }
+    setConfirmation({
+      title: "Excluir data especial?",
+      message: `${event.nome}: somente esta configuração será removida. As exceções individuais serão preservadas e a programação anterior será restaurada onde não houver outra configuração aplicável.`,
+      accept: () =>
+        void perform(async () => {
+          const expected = activeDataContext.current;
+          if (demo)
+            setData((current) => ({
+              ...current,
+              specialDates: (current.specialDates ?? []).filter(
+                (item) => item.id !== event.id,
+              ),
+              logs: [
+                {
+                  id: crypto.randomUUID(),
+                  tabela: "datas_especiais",
+                  acao: "DELETE",
+                  alterado_em: new Date().toISOString(),
+                  registro_id: event.id,
+                  empresa_id: event.empresa_id,
+                  ator_id: "demo-user",
+                  antes: { ...event },
+                  depois: null,
+                  campos: [],
+                },
+                ...current.logs,
+              ],
+            }));
+          else {
+            await deleteCompanySpecialDate(event.empresa_id, event.id);
+            await refresh(expected);
+          }
+          assertDataContext(expected);
+          notify("Data especial excluída. Exceções individuais preservadas.");
+        }),
+    });
+  };
   async function ownModel(model: Model): Promise<Model> {
     const expected = activeDataContext.current;
     if (!company) throw new Error("Selecione uma empresa.");
@@ -958,10 +1149,23 @@ export default function Workspace() {
     return { ...copy, id };
   }
   function withNeighbors(s: Schedule): Schedule {
-    return {
-      ...s,
-      dias: validationDays(s, data.schedules),
-    };
+    const target = data.companies.find((entry) => entry.id === s.empresa_id);
+    const person = data.employees.find(
+      (entry) =>
+        entry.id === s.funcionario_id && entry.empresa_id === s.empresa_id,
+    );
+    const projected =
+      target && person
+        ? projectSchedule(
+            { ...s, dias: validationDays(s, rawData.schedules) },
+            target,
+            person,
+            data.specialDates ?? [],
+            data.establishments ?? [],
+            data.holidays,
+          )
+        : s;
+    return projected;
   }
   function createSchedule(
     e: Employee,
@@ -983,6 +1187,15 @@ export default function Workspace() {
         "A empresa não permite 6x1. A prévia mostrará o alerta; confira a CCT.",
         true,
       );
+    const previous =
+      draft?.funcionario_id === e.id && draft.mes.startsWith(targetMonth)
+        ? draft
+        : rawData.schedules.find(
+            (entry) =>
+              entry.empresa_id === company.id &&
+              entry.funcionario_id === e.id &&
+              entry.mes.startsWith(targetMonth),
+          );
     return withNeighbors({
       id: "",
       empresa_id: company.id,
@@ -992,7 +1205,16 @@ export default function Workspace() {
       nome_funcionario: e.nome,
       modelo_nome: m.nome,
       modelo_tipo: m.tipo,
-      dias: generateDays(targetMonth, m, company, data.holidays, restHoliday),
+      dias: preserveIndividualExceptions(
+        generateCalendarDays(
+          targetMonth,
+          m,
+          employeeLocation(company, e, data.establishments ?? []),
+          data.holidays,
+          restHoliday,
+        ),
+        previous?.dias ?? [],
+      ),
     });
   }
   async function persistSchedules(items: Schedule[]) {
@@ -1119,13 +1341,21 @@ export default function Workspace() {
       targets.push(
         withNeighbors({
           ...next,
-          dias: duplicateDays(
-            s.dias.filter((d) => d.data.startsWith(s.mes.slice(0, 7))),
-            target,
-            owned,
-            company,
-            data.holidays,
-            restHoliday,
+          dias: preserveIndividualExceptions(
+            mergeGeneratedCalendarPolicy(
+              duplicateDays(
+                duplicationBaseDays(
+                  s.dias.filter((d) => d.data.startsWith(s.mes.slice(0, 7))),
+                ),
+                target,
+                owned,
+                employeeLocation(company, e, data.establishments ?? []),
+                data.holidays,
+                false,
+              ),
+              next.dias,
+            ),
+            next.dias,
           ),
         }),
       );
@@ -1227,6 +1457,16 @@ export default function Workspace() {
         }
       }
       if (modal.kind === "funcionario") {
+        const unitId = pick(fd, "estabelecimento_id") || null;
+        const unit = (data.establishments ?? []).find(
+          (entry) =>
+            entry.id === unitId && entry.empresa_id === pick(fd, "empresa_id"),
+        );
+        if (
+          unitId &&
+          (!unit || (!unit.ativo && modal.row?.estabelecimento_id !== unitId))
+        )
+          throw new Error("Selecione um estabelecimento ativo desta empresa.");
         const cpf = normalizeCpf(pick(fd, "cpf"));
         const dailyContract = contractMinutesFromHours(
           pick(fd, "carga_diaria"),
@@ -1237,6 +1477,7 @@ export default function Workspace() {
           "funcionarios",
           {
             empresa_id: pick(fd, "empresa_id"),
+            estabelecimento_id: unitId,
             nome: pick(fd, "nome"),
             ...(cpf !== null || modal.row?.cpf != null ? { cpf } : {}),
             cargo: pick(fd, "cargo"),
@@ -1319,6 +1560,66 @@ export default function Workspace() {
             abrangencia,
             uf: abrangencia === "nacional" ? null : uf,
             cidade: abrangencia === "municipal" ? cidade : null,
+          },
+          id,
+        );
+      }
+      if (modal.kind === "data_especial") {
+        if (!scopedCompany)
+          throw new Error("Abra a empresa antes de cadastrar datas especiais.");
+        const value: Omit<SpecialDate, "id"> = {
+          empresa_id: scopedCompany.id,
+          estabelecimento_id: pick(fd, "estabelecimento_id") || null,
+          nome: pick(fd, "nome"),
+          categoria: pick(fd, "categoria") as SpecialDate["categoria"],
+          data_inicio: pick(fd, "data_inicio"),
+          data_fim: pick(fd, "data_fim") || null,
+          alcance: pick(fd, "alcance") as SpecialDate["alcance"],
+          funcionario_ids: JSON.parse(pick(fd, "funcionario_ids") || "[]"),
+          recorrencia: pick(fd, "recorrencia") as SpecialDate["recorrencia"],
+          expediente: pick(fd, "expediente") as SpecialDate["expediente"],
+          intervalos: JSON.parse(pick(fd, "intervalos") || "[]"),
+          observacoes: pick(fd, "observacoes"),
+          ativo: fd.has("ativo"),
+          data_movel: fd.has("data_movel"),
+          uf: pick(fd, "uf").toUpperCase() || null,
+          cidade: pick(fd, "cidade") || null,
+        };
+        validateSpecialDate(
+          value,
+          data.employees,
+          data.establishments ?? [],
+          scopedCompany.id,
+        );
+        if (
+          (data.specialDates ?? []).some(
+            (event) =>
+              event.empresa_id === scopedCompany.id &&
+              event.id !== id &&
+              specialDateIdentity(event) === specialDateIdentity(value),
+          )
+        )
+          throw new Error(
+            "Esta data especial já está cadastrada para o mesmo alcance. Edite o registro existente.",
+          );
+        await rowSave("datas_especiais", value, id);
+      }
+      if (modal.kind === "estabelecimento") {
+        if (!scopedCompany)
+          throw new Error("Abra a empresa para cadastrar um estabelecimento.");
+        const nome = pick(fd, "nome"),
+          cidade = pick(fd, "cidade"),
+          uf = pick(fd, "uf").toUpperCase();
+        if (!nome || !cidade || !/^[A-Z]{2}$/.test(uf))
+          throw new Error("Informe nome, município e UF do estabelecimento.");
+        await rowSave(
+          "estabelecimentos",
+          {
+            empresa_id: scopedCompany.id,
+            nome,
+            cidade,
+            uf,
+            ativo: fd.has("ativo"),
           },
           id,
         );
@@ -1410,7 +1711,15 @@ export default function Workspace() {
     if (
       scopedCompany &&
       (scopedCompany.situacao ?? "ativa") !== "ativa" &&
-      ["funcionario", "modelo", "dia", "regra", "feriado"].includes(kind)
+      [
+        "funcionario",
+        "modelo",
+        "dia",
+        "regra",
+        "feriado",
+        "data_especial",
+        "estabelecimento",
+      ].includes(kind)
     ) {
       notify(
         "Esta empresa está em consulta. Reative-a antes de alterar funcionários ou escalas.",
@@ -1430,6 +1739,14 @@ export default function Workspace() {
       setActiveDate((row as Day).data);
     }
     let targetRow = row as Record<string, unknown> | undefined;
+    if (
+      ["data_especial", "estabelecimento"].includes(kind) &&
+      (!scopedCompany ||
+        (targetRow && targetRow.empresa_id !== scopedCompany.id))
+    ) {
+      notify("O cadastro deve pertencer à empresa ativa.", true);
+      return;
+    }
     if (["modelo", "regra", "feriado"].includes(kind) && companyScopeId) {
       if (targetRow?.empresa_id && targetRow.empresa_id !== companyScopeId) {
         notify("O registro pertence a outra empresa.", true);
@@ -1547,7 +1864,11 @@ export default function Workspace() {
       setScheduleView("individual");
       setPage("escalas");
       void perform(async () => {
-        await exportTimesheetPDF(selected, target, person);
+        await exportTimesheetPDF(
+          selected,
+          employeeLocation(target, person, data.establishments ?? []),
+          person,
+        );
       });
     });
   };
@@ -2625,7 +2946,11 @@ export default function Workspace() {
                                   if (company && employee)
                                     await exportTimesheetPDF(
                                       schedule,
-                                      company,
+                                      employeeLocation(
+                                        company,
+                                        employee,
+                                        data.establishments ?? [],
+                                      ),
                                       employee,
                                       { preview: dirty || !saved },
                                     );
@@ -2665,6 +2990,7 @@ export default function Workspace() {
                                   data.employees.find(
                                     (e) => e.id === schedule.funcionario_id,
                                   ),
+                                  company,
                                 )
                               }
                             >
@@ -2721,6 +3047,10 @@ export default function Workspace() {
                           {schedule.dias
                             .filter((d) => d.data.startsWith(month))
                             .map((d) => {
+                              const presentation = dayPresentation(
+                                d,
+                                schedule.dias,
+                              );
                               const dayAlerts = alertsForDate(
                                 alertSummary.groups,
                                 d.data,
@@ -2741,13 +3071,15 @@ export default function Workspace() {
                                   key={d.data}
                                   id={`escala-dia-${d.data}`}
                                   data-date={d.data}
+                                  data-day-kind={presentation.kind}
+                                  data-expediente={presentation.status}
                                   data-problem={problem || undefined}
                                   aria-selected={activeDate === d.data}
                                   role="gridcell"
                                   disabled={scheduleReadOnly}
                                   className={`day ${computeDay(d, scheduleRules, schedule.dias).worked === 0 ? "rest" : ""} ${problem ? `has-${problem}` : ""} ${activeDate === d.data ? "selected" : ""}`}
                                   onClick={() => edit("dia", d)}
-                                  aria-label={`${dateLabel(d.data)}${violations.length ? `, ${violations.length} violações impeditivas` : attention.length ? `, ${attention.length} avisos` : ""}: ${d.intervalos.length ? shiftText(d.intervalos) : computeDay(d, scheduleRules, schedule.dias).worked > 0 ? "Continuação do turno anterior" : "Folga"}. Editar.`}
+                                  aria-label={`${dateLabel(d.data)}${violations.length ? `, ${violations.length} violações impeditivas` : attention.length ? `, ${attention.length} avisos` : ""}: ${presentation.label}${presentation.description ? `, ${presentation.description}` : ""}, ${presentation.status}. ${d.intervalos.length ? shiftText(d.intervalos) : computeDay(d, scheduleRules, schedule.dias).worked > 0 ? "Continuação do turno anterior" : "Folga"}. Editar.`}
                                 >
                                   <span className="day-number">
                                     <span className="desktop-day">
@@ -2806,6 +3138,21 @@ export default function Workspace() {
                                       )}
                                     </span>
                                   )}
+                                  {presentation.kind !== "trabalho" &&
+                                    presentation.kind !== "folga" && (
+                                      <span className="day-event-label">
+                                        <strong>{presentation.label}</strong>
+                                        <span>{presentation.status}</span>
+                                        {!presentation.hasWork && (
+                                          <span>Jornada prevista: 0h00</span>
+                                        )}
+                                      </span>
+                                    )}
+                                  {d.calendario?.excecao && (
+                                    <span className="day-individual">
+                                      Exceção individual
+                                    </span>
+                                  )}
                                   {problem && (
                                     <span className={`day-problem ${problem}`}>
                                       {violations.length
@@ -2813,8 +3160,11 @@ export default function Workspace() {
                                         : `${attention.length} aviso(s)`}
                                     </span>
                                   )}
-                                  {d.feriado && (
-                                    <span className="holiday">{d.feriado}</span>
+                                  {(presentation.names.length > 0 ||
+                                    d.feriado) && (
+                                    <span className="holiday">
+                                      {presentation.description || d.feriado}
+                                    </span>
                                   )}
                                   {d.observacao && (
                                     <span className="holiday special-day-label">
@@ -2826,6 +3176,16 @@ export default function Workspace() {
                             })}
                         </div>
                         <div className="legend">
+                          <span className="special-legend holiday">
+                            Feriado / feriado trabalhado
+                          </span>
+                          <span className="special-legend optional">
+                            Ponto facultativo
+                          </span>
+                          <span className="special-legend recess">Recesso</span>
+                          <span className="special-legend closed">
+                            Dia sem expediente
+                          </span>
                           <span>
                             <span className="dot work-dot mr-1" />
                             Dia trabalhado
@@ -2906,6 +3266,44 @@ export default function Workspace() {
                           ajustar.
                         </div>
                       </div>
+                      {calendarTotals && (
+                        <section
+                          className="panel calendar-totals"
+                          aria-label="Resumo de feriados e datas especiais"
+                        >
+                          <div className="panel-head">
+                            <h2>Datas especiais na competência</h2>
+                          </div>
+                          <dl className="company-details panel-body">
+                            <div>
+                              <dt>Feriados</dt>
+                              <dd>{calendarTotals.holidays}</dd>
+                            </div>
+                            <div>
+                              <dt>Feriados trabalhados</dt>
+                              <dd>{calendarTotals.workingHolidays}</dd>
+                            </div>
+                            <div>
+                              <dt>Horas programadas em feriados</dt>
+                              <dd>
+                                {formatMinutes(calendarTotals.holidayMinutes)}
+                              </dd>
+                            </div>
+                            <div>
+                              <dt>Pontos facultativos</dt>
+                              <dd>{calendarTotals.optionalDays}</dd>
+                            </div>
+                            <div>
+                              <dt>Dias de recesso</dt>
+                              <dd>{calendarTotals.recessDays}</dd>
+                            </div>
+                            <div>
+                              <dt>Outros dias sem expediente</dt>
+                              <dd>{calendarTotals.noWorkDays}</dd>
+                            </div>
+                          </dl>
+                        </section>
+                      )}
                       {report && (
                         <div className="periods">
                           {report.periods.map((p) => (
@@ -3169,6 +3567,26 @@ export default function Workspace() {
                 }
               />
             </section>
+          )}
+          {scopedCompany && page === "company-settings" && (
+            <EstablishmentsPanel
+              company={scopedCompany}
+              establishments={data.establishments ?? []}
+              busy={busy}
+              onEdit={(unit) => edit("estabelecimento", unit)}
+            />
+          )}
+          {scopedCompany && page === "feriados" && (
+            <SpecialDates
+              company={scopedCompany}
+              employees={data.employees}
+              events={data.specialDates ?? []}
+              establishments={data.establishments ?? []}
+              month={month}
+              busy={busy}
+              onEdit={(event) => edit("data_especial", event)}
+              onDelete={deleteSpecialDate}
+            />
           )}
           {scopedCompany &&
             ["modelos", "feriados", "regras"].includes(page) && (
@@ -3543,7 +3961,7 @@ export default function Workspace() {
       </main>
       {modal && (
         <Dialog
-          title={`${modal.row ? "Editar" : "Cadastrar"} ${{ empresa: "empresa", funcionario: "funcionário", modelo: "modelo de jornada", feriado: "feriado", regra: "parâmetro legal", dia: "dia da escala" }[modal.kind]}`}
+          title={`${modal.row ? "Editar" : "Cadastrar"} ${{ empresa: "empresa", funcionario: "funcionário", modelo: "modelo de jornada", feriado: "feriado", regra: "parâmetro legal", dia: "dia da escala", data_especial: "data especial", estabelecimento: "estabelecimento" }[modal.kind]}`}
           close={() => setModal(null)}
         >
           <form onSubmit={formSubmit}>
@@ -3560,6 +3978,7 @@ export default function Workspace() {
                   companies={data.companies}
                   models={data.models}
                   companyId={companyScopeId ?? undefined}
+                  establishments={data.establishments ?? []}
                 />
               )}
               {modal.kind === "modelo" && (
@@ -3614,6 +4033,24 @@ export default function Workspace() {
                     />
                   </Field>
                 </>
+              )}
+              {modal.kind === "data_especial" && scopedCompany && (
+                <SpecialDateFields
+                  key={String(modal.row?.id ?? "new")}
+                  company={scopedCompany}
+                  employees={data.employees}
+                  establishments={data.establishments ?? []}
+                  event={modal.row as unknown as SpecialDate | undefined}
+                  month={month}
+                />
+              )}
+              {modal.kind === "estabelecimento" && scopedCompany && (
+                <EstablishmentFields
+                  company={scopedCompany}
+                  establishment={
+                    modal.row as unknown as Establishment | undefined
+                  }
+                />
               )}
               {modal.kind === "regra" && (
                 <>
@@ -3671,6 +4108,8 @@ export default function Workspace() {
                   <DayEditor
                     key={String(modal.row?.data)}
                     day={modal.row as unknown as Day}
+                    inheritedDay={inheritedDay}
+                    calendarDays={schedule?.dias}
                     onChange={setEditedDay}
                   />
                   {editedDay && editedReport && (
