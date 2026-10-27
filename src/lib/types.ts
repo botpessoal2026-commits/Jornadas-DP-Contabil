@@ -33,6 +33,7 @@ export type Company = {
 export type Employee = {
   id: string;
   empresa_id: string;
+  estabelecimento_id?: string | null;
   nome: string;
   cpf?: string | null;
   cargo: string;
@@ -84,6 +85,73 @@ export type Day = {
   folga: boolean;
   feriado: string | null;
   observacao: string;
+  calendario?: {
+    base: DayPlan;
+    excecao?: DayException | null;
+    folgar_feriado?: boolean;
+  } | null;
+  eventos?: DateOccurrence[];
+};
+export type Establishment = {
+  id: string;
+  empresa_id: string;
+  nome: string;
+  cidade: string;
+  uf: string;
+  ativo: boolean;
+};
+export type SpecialDateCategory =
+  | "feriado_nacional"
+  | "feriado_estadual"
+  | "feriado_municipal"
+  | "feriado_especifico"
+  | "ponto_facultativo"
+  | "recesso"
+  | "sem_expediente";
+export type SpecialDate = {
+  id: string;
+  empresa_id: string;
+  estabelecimento_id: string | null;
+  nome: string;
+  data_inicio: string;
+  data_fim: string | null;
+  categoria: SpecialDateCategory;
+  alcance: "empresa" | "selecionados" | "funcionario";
+  funcionario_ids: string[];
+  recorrencia: "unica" | "anual" | "periodo";
+  expediente: "sem_expediente" | "normal" | "reduzido" | "individual";
+  intervalos: Shift[];
+  observacoes: string;
+  ativo: boolean;
+  data_movel: boolean;
+  uf: string | null;
+  cidade: string | null;
+};
+export type DayPlan = {
+  intervalos: Shift[];
+  folga: boolean;
+  feriado: string | null;
+  observacao: string;
+};
+export type DayException = {
+  categoria:
+    | "trabalho"
+    | "folga"
+    | "feriado"
+    | "ponto_facultativo"
+    | "recesso"
+    | "sem_expediente";
+  nome: string;
+  expediente: "normal" | "sem_expediente" | "reduzido";
+  intervalos: Shift[];
+  observacao: string;
+};
+export type DateOccurrence = {
+  id: string;
+  nome: string;
+  categoria: SpecialDateCategory;
+  origem: "empresa" | "estabelecimento" | "individual" | "oficial";
+  expediente: SpecialDate["expediente"];
 };
 export type Schedule = {
   id: string;

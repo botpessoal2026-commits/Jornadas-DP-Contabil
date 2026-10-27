@@ -1,6 +1,6 @@
 "use client";
 import { useId, useState } from "react";
-import type { Company, Employee, Model } from "@/lib/types";
+import type { Company, Employee, Model, Establishment } from "@/lib/types";
 import { formatCpf } from "@/lib/cpf";
 import { modelsForCompany } from "@/lib/company-resources";
 
@@ -23,6 +23,7 @@ export type EmployeeFieldsProps = {
   companies: CompanyDefaults[];
   models: Model[];
   companyId?: string;
+  establishments?: Establishment[];
 };
 const days = [
   "Domingo",
@@ -42,6 +43,7 @@ export default function EmployeeFields({
   companies,
   models,
   companyId,
+  establishments = [],
 }: EmployeeFieldsProps) {
   const id = useId();
   const fixedCompany = employee?.empresa_id ?? companyId;
@@ -53,6 +55,9 @@ export default function EmployeeFields({
       "",
   );
   const company = companies.find((item) => item.id === selectedCompany);
+  const [selectedUnit, setSelectedUnit] = useState(
+    employee?.estabelecimento_id ?? "",
+  );
   const [selectedModel, setSelectedModel] = useState(
     employee?.modelo_padrao_id ?? "",
   );
@@ -85,6 +90,7 @@ export default function EmployeeFields({
           onChange={(event) => {
             const nextId = event.target.value;
             setSelectedCompany(nextId);
+            setSelectedUnit("");
             setSelectedModel("");
             if (!weeklyTouched)
               setWeeklyHours(
@@ -112,6 +118,29 @@ export default function EmployeeFields({
         {fixedCompany && (
           <input type="hidden" name="empresa_id" value={selectedCompany} />
         )}
+      </label>
+      <label htmlFor={`${id}-establishment`}>
+        Estabelecimento (opcional)
+        <select
+          id={`${id}-establishment`}
+          name="estabelecimento_id"
+          value={selectedUnit}
+          onChange={(event) => setSelectedUnit(event.target.value)}
+        >
+          <option value="">Localidade principal da empresa</option>
+          {establishments
+            .filter(
+              (unit) =>
+                unit.empresa_id === selectedCompany &&
+                (unit.ativo || unit.id === selectedUnit),
+            )
+            .map((unit) => (
+              <option key={unit.id} value={unit.id}>
+                {unit.nome} · {unit.cidade}/{unit.uf}
+                {unit.ativo ? "" : " (inativo)"}
+              </option>
+            ))}
+        </select>
       </label>
       <label htmlFor={`${id}-name`}>
         Nome do funcionário

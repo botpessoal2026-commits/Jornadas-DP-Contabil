@@ -399,6 +399,10 @@ export function EmployeeDetails({
           (log.tabela === "escalas" && scheduleIds.has(log.registro_id ?? ""))),
     )
     .sort((a, b) => b.alterado_em.localeCompare(a.alterado_em));
+  const establishment = (data.establishments ?? []).find(
+    (unit) =>
+      unit.id === employee.estabelecimento_id && unit.empresa_id === company.id,
+  );
   return (
     <section className="employee-detail" aria-label="Página do funcionário">
       <div className="page-head">
@@ -450,6 +454,14 @@ export function EmployeeDetails({
               <div>
                 <dt>Empresa</dt>
                 <dd>{company.nome}</dd>
+              </div>
+              <div>
+                <dt>Estabelecimento / localidade</dt>
+                <dd>
+                  {establishment
+                    ? `${establishment.nome} · ${establishment.cidade}/${establishment.uf}`
+                    : `${company.cidade}/${company.uf} · Localidade principal`}
+                </dd>
               </div>
               <div>
                 <dt>CPF</dt>

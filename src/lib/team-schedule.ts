@@ -3,7 +3,7 @@ import type { Company, Employee, Schedule } from "./types";
 import { alertsForDate, buildAlertSummary } from "./alerts";
 import { rulesForCompany } from "./company-resources";
 import { scheduleRegime } from "./work-regime";
-import { validationDays } from "./schedule-context";
+import { projectData, dayPresentation } from "./special-dates";
 import {
   computeDay,
   evaluate,
@@ -19,6 +19,8 @@ export type TeamDay = {
   shifts: string[];
   holiday?: string | null;
   problem: "violation" | "attention" | null;
+  eventLabel?: string;
+  dayKind?: string;
 };
 export type TeamRow = {
   company: Company;
@@ -34,6 +36,7 @@ export function teamScheduleRows(
   month: string,
   companyId: string | null,
 ): TeamRow[] {
+  data = projectData(data);
   const companies = new Map(
     data.companies
       .filter((company) => companyId === null || company.id === companyId)
@@ -56,7 +59,7 @@ export function teamScheduleRows(
       if (schedule) {
         try {
           const report = evaluate(
-            validationDays(schedule, data.schedules),
+            schedule.dias,
             rules,
             company,
             schedule.mes,
@@ -81,6 +84,7 @@ export function teamScheduleRows(
           return { date, state: "missing", shifts: [], problem: null };
         try {
           const result = computeDay(day, rules, schedule.dias);
+          const presentation = dayPresentation(day, schedule.dias);
           const alerts = alertsForDate(groups, date);
           return {
             date,
@@ -91,6 +95,8 @@ export function teamScheduleRows(
                 `${shift.start}–${shift.end}${span(shift)[1] >= 1440 ? " (+1)" : ""}`,
             ),
             holiday: day.feriado,
+            eventLabel: presentation.description || undefined,
+            dayKind: presentation.kind,
             problem: alerts.some((alert) => alert.category === "violation")
               ? "violation"
               : alerts.some((alert) => alert.category === "attention")
