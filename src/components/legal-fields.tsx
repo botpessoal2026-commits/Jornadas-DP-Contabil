@@ -2,6 +2,7 @@
 import { useState } from "react";
 import { initialRules } from "@/lib/presets";
 import { default12x36Values } from "@/lib/work-regime";
+import { legalValuePresentation } from "@/lib/legal-presentation";
 
 type Field = {
   key: string;
@@ -184,6 +185,7 @@ export default function LegalFields({
               {field.label}
               <input
                 type="number"
+                aria-label={field.label}
                 min={field.min ?? 0}
                 max={field.max}
                 step="any"
@@ -201,6 +203,16 @@ export default function LegalFields({
                   }))
                 }
               />
+              {typeof values[field.key] === "number" &&
+                (field.key === "minutos" ||
+                  field.key.endsWith("_minutos") ||
+                  field.key.endsWith("_segundos") ||
+                  field.key.endsWith("_horas")) && (
+                  <span className="legal-unit-preview">
+                    Equivale a{" "}
+                    {legalValuePresentation(field.key, values[field.key]).value}
+                  </span>
+                )}
             </label>
           ),
         )}

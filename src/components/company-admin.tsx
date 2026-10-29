@@ -8,6 +8,10 @@ import {
   History,
   Settings,
   Users,
+  CheckCircle2,
+  Circle,
+  ClipboardList,
+  FileText,
 } from "lucide-react";
 import type { Data } from "@/lib/store";
 import type { Company } from "@/lib/types";
@@ -31,6 +35,8 @@ const views: { id: CompanyView; label: string; icon: typeof Users }[] = [
   { id: "feriados", label: "Feriados", icon: Flag },
   { id: "configuracoes", label: "Configurações", icon: Settings },
   { id: "historico", label: "Histórico", icon: History },
+  { id: "operacoes", label: "Operações", icon: ClipboardList },
+  { id: "relatorios", label: "Relatórios", icon: FileText },
 ];
 function dateLabel(value?: string | null) {
   return value && Number.isFinite(+new Date(value))
@@ -62,6 +68,43 @@ export default function CompanyAdmin({
 }) {
   const summary = companySummary(data, company, month);
   const situation = companySituation(company);
+  const setupSteps: {
+    label: string;
+    complete: boolean;
+    target: CompanyView;
+  }[] = [
+    {
+      label: "Município e UF informados",
+      complete: !!company.cidade && !!company.uf,
+      target: "configuracoes",
+    },
+    {
+      label: "Funcionários ativos cadastrados",
+      complete: summary.employees > 0,
+      target: "funcionarios",
+    },
+    {
+      label: "Modelo próprio ou padrão vinculado",
+      complete:
+        !!company.modelo_padrao_id ||
+        data.models.some((model) => model.empresa_id === company.id),
+      target: "modelos",
+    },
+    {
+      label: "Parâmetro com fonte conferida cadastrado",
+      complete: data.rules.some(
+        (rule) =>
+          (rule.empresa_id === company.id || !rule.empresa_id) &&
+          rule.confirmado,
+      ),
+      target: "regras",
+    },
+    {
+      label: "Primeira escala da competência salva",
+      complete: summary.savedSchedules > 0,
+      target: "escalas",
+    },
+  ];
   return (
     <>
       <nav className="company-breadcrumb" aria-label="Caminho da empresa">
@@ -233,57 +276,88 @@ export default function CompanyAdmin({
               <h2>Próximos passos do cadastro</h2>
             </div>
             <div className="panel-body company-next-steps">
-              {!company.cidade || !company.uf ? (
-                <p>
-                  Complete município e UF para conferir a aplicação dos feriados
-                  locais.
-                </p>
-              ) : (
-                <p>
-                  Localização informada: {company.cidade} / {company.uf}.
-                </p>
-              )}
-              {!summary.employees ? (
-                <button
-                  className="button"
-                  onClick={() => onNavigate("funcionarios")}
-                >
-                  Adicionar funcionários nesta empresa
-                </button>
-              ) : null}
-              {!company.modelo_padrao_id ? (
-                <p>
-                  Modelo padrão da empresa ainda não definido. Jornadas
-                  individuais permanecem preservadas.
-                </p>
-              ) : (
-                <p>
-                  Modelo padrão:{" "}
-                  <strong>
-                    {data.models.find(
-                      (model) => model.id === company.modelo_padrao_id,
-                    )?.nome ?? "Modelo indisponível; revise o cadastro"}
-                  </strong>
-                  .
-                </p>
-              )}
-              <p>
-                {summary.pendingSources} pendências de fontes/regras na
-                conferência das escalas. Esses registros não representam, por si
-                só, violações trabalhistas.
+              <p className="setup-progress">
+                {setupSteps.filter((step) => step.complete).length} de{" "}
+                {setupSteps.length} etapas de cadastro concluídas
               </p>
-              {summary.unreadableSchedules > 0 && (
-                <p className="warning-text">
-                  {summary.unreadableSchedules} escala(s) não puderam ser
-                  conferidas por dados inválidos. Os contadores não representam
-                  uma conferência completa; abra as escalas para corrigir.
+              <ol className="company-setup-checklist">
+                {setupSteps.map((step) => (
+                  <li key={step.label}>
+                    <button
+                      type="button"
+                      onClick={() => onNavigate(step.target)}
+                    >
+                      {step.complete ? (
+                        <CheckCircle2 size={18} aria-hidden="true" />
+                      ) : (
+                        <Circle size={18} aria-hidden="true" />
+                      )}
+                      <span>
+                        {step.label}
+                        <small>
+                          {step.complete ? "Cadastrado" : "Completar cadastro"}
+                        </small>
+                      </span>
+                      <span aria-hidden="true">→</span>
+                    </button>
+                  </li>
+                ))}
+              </ol>
+              <details className="company-setup-notes">
+                <summary>Detalhes do cadastro e da conferência</summary>
+                {!company.cidade || !company.uf ? (
+                  <p>
+                    Complete município e UF para conferir a aplicação dos
+                    feriados locais.
+                  </p>
+                ) : (
+                  <p>
+                    Localização informada: {company.cidade} / {company.uf}.
+                  </p>
+                )}
+                {!summary.employees ? (
+                  <button
+                    className="button"
+                    onClick={() => onNavigate("funcionarios")}
+                  >
+                    Adicionar funcionários nesta empresa
+                  </button>
+                ) : null}
+                {!company.modelo_padrao_id ? (
+                  <p>
+                    Modelo padrão da empresa ainda não definido. Jornadas
+                    individuais permanecem preservadas.
+                  </p>
+                ) : (
+                  <p>
+                    Modelo padrão:{" "}
+                    <strong>
+                      {data.models.find(
+                        (model) => model.id === company.modelo_padrao_id,
+                      )?.nome ?? "Modelo indisponível; revise o cadastro"}
+                    </strong>
+                    .
+                  </p>
+                )}
+                <p>
+                  {summary.pendingSources} pendências de fontes/regras na
+                  conferência das escalas. Esses registros não representam, por
+                  si só, violações trabalhistas.
                 </p>
-              )}
-              <p className="muted">
-                Aprovação e publicação ainda não possuem fluxo persistido. As
-                escalas salvas dependem de revisão humana e não recebem
-                certificação jurídica automática.
-              </p>
+                {summary.unreadableSchedules > 0 && (
+                  <p className="warning-text">
+                    {summary.unreadableSchedules} escala(s) não puderam ser
+                    conferidas por dados inválidos. Os contadores não
+                    representam uma conferência completa; abra as escalas para
+                    corrigir.
+                  </p>
+                )}
+                <p className="muted">
+                  As etapas indicam preenchimento do cadastro. A conferência de
+                  cada escala depende das regras aplicáveis, das fontes e da
+                  revisão humana; não há certificação jurídica automática.
+                </p>
+              </details>
               <div className="actions">
                 <button
                   className="button"

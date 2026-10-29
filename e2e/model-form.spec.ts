@@ -97,7 +97,11 @@ test("total semanal não aparenta valor válido durante entrada parcial ou perí
   await expect(
     dialog.getByText("Total semanal: confira os horários", { exact: true }),
   ).toBeVisible();
-  await expect(dialog.getByText(/os períodos se sobrepõem/)).toBeVisible();
+  const errorId = await monday.getAttribute("aria-describedby");
+  expect(errorId).toBeTruthy();
+  const inlineError = dialog.locator(`[id="${errorId}"]`);
+  await expect(inlineError).toBeVisible();
+  await expect(inlineError).toContainText("os períodos se sobrepõem");
   await dialog
     .getByLabel("Nome do modelo", { exact: true })
     .fill("Modelo com horário a revisar");

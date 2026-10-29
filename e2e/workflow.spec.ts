@@ -115,7 +115,7 @@ test("carga contratual editável reabre e gera alertas sem substituir observaç�
     .getByRole("button", { name: "Editar funcionário", exact: true })
     .click();
   await page
-    .getByRole("spinbutton", { name: "Carga semanal contratual (horas)" })
+    .getByRole("textbox", { name: "Carga semanal contratual (horas)" })
     .fill("30");
   await page
     .getByRole("button", { name: "Salvar cadastro", exact: true })
@@ -130,8 +130,8 @@ test("carga contratual editável reabre e gera alertas sem substituir observaç�
     .getByRole("button", { name: "Editar funcionário", exact: true })
     .click();
   await expect(
-    page.getByRole("spinbutton", { name: "Carga semanal contratual (horas)" }),
-  ).toHaveValue("30");
+    page.getByRole("textbox", { name: "Carga semanal contratual (horas)" }),
+  ).toHaveValue("30:00");
   await page
     .getByRole("button", { name: "Salvar cadastro", exact: true })
     .click();

@@ -139,7 +139,7 @@ async function prepareCycle(
     .getByLabel("Carga diária contratual (horas)", { exact: true })
     .fill("");
   await dialog
-    .getByRole("spinbutton", { name: /^Carga semanal contratual \(horas\)/ })
+    .getByRole("textbox", { name: /^Carga semanal contratual \(horas\)/ })
     .fill("42");
   for (const checkbox of await dialog
     .getByRole("group", { name: "Dias de descanso contratuais", exact: true })

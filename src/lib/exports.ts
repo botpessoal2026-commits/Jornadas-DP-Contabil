@@ -2,6 +2,7 @@ import type { Company, Employee, LegalRule, Schedule } from "./types";
 import { computeDay, evaluate, formatMinutes, span } from "./engine";
 import { rulesForCompany } from "./company-resources";
 import { dayPresentation, specialDateTotals } from "./special-dates";
+import { scheduleStatusLabels } from "./schedule-governance";
 export function exportRows(
   schedule: Schedule,
   rules: LegalRule[],
@@ -47,6 +48,12 @@ export function exportRows(
         "Horas programadas em feriados": formatMinutes(
           presentation.isHoliday ? hours.worked : 0,
         ),
+        "Situação da escala":
+          scheduleStatusLabels[schedule.status ?? "rascunho"],
+        "Revisão da escala":
+          schedule.revisao === undefined
+            ? "Não versionada"
+            : String(schedule.revisao),
       };
     });
 }
@@ -63,7 +70,40 @@ function calendarSummary(schedule: Schedule, rules: LegalRule[]) {
     ["Outros dias sem expediente", String(totals.noWorkDays)],
   ];
 }
-function download(blob: Blob, name: string) {
+/** Keep files distinguishable across clients without putting CPF in the name. */
+export function reportFilename(
+  kind: string,
+  schedule: Pick<
+    Schedule,
+    "mes" | "empresa_id" | "funcionario_id" | "nome_funcionario"
+  >,
+  extension: string,
+  company?: Pick<Company, "nome">,
+  employee?: Pick<Employee, "nome" | "matricula">,
+) {
+  const slug = (value: string, fallback: string) =>
+    value
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-|-$/g, "")
+      .slice(0, 60) || fallback;
+  return (
+    [
+      slug(kind, "relatorio"),
+      slug(company?.nome ?? schedule.empresa_id, "empresa"),
+      slug(
+        employee?.nome ?? schedule.nome_funcionario ?? schedule.funcionario_id,
+        "funcionario",
+      ),
+      schedule.mes.slice(0, 7),
+    ].join("-") +
+    "." +
+    extension.replace(/[^a-z0-9]/gi, "").toLowerCase()
+  );
+}
+export function downloadReport(blob: Blob, name: string) {
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
   a.download = name;
@@ -86,11 +126,11 @@ export function exportCSV(
   employee?: Employee,
   company?: Company,
 ) {
-  download(
+  downloadReport(
     new Blob([csvText(exportRows(s, rules, employee, company))], {
       type: "text/csv;charset=utf-8",
     }),
-    `escala-${s.mes.slice(0, 7)}.csv`,
+    reportFilename("escala", s, "csv", company, employee),
   );
 }
 export async function excelBuffer(
@@ -155,11 +195,11 @@ export async function exportExcel(
   employee?: Employee,
 ) {
   const buffer = await excelBuffer(s, rules, company, employee);
-  download(
+  downloadReport(
     new Blob([new Uint8Array(buffer)], {
       type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     }),
-    `escala-${s.mes.slice(0, 7)}.xlsx`,
+    reportFilename("escala", s, "xlsx", company, employee),
   );
 }
 export async function pdfDocument(
@@ -167,10 +207,15 @@ export async function pdfDocument(
   rules: LegalRule[],
   company: Company,
   employee?: Employee,
+  options: { compact?: boolean; preview?: boolean } = {},
 ) {
   const { jsPDF } = await import("jspdf");
   const { default: autoTable } = await import("jspdf-autotable");
   const doc = new jsPDF();
+  doc.setProperties({
+    title: `Escala - ${company.nome} - ${employee?.nome ?? s.nome_funcionario ?? ""} - ${s.mes.slice(0, 7)}`,
+    creator: "Cont Contábil · Gerador de Jornadas",
+  });
   const result = evaluate(
     s.dias,
     rules,
@@ -179,18 +224,73 @@ export async function pdfDocument(
     s.modelo_tipo,
     employee,
   );
+  if (options.compact) {
+    doc.setFontSize(15);
+    doc.text("Escala de trabalho · Cont Contábil", 14, 16);
+    doc.setFontSize(9);
+    const heading = doc.splitTextToSize(
+      `${company.nome} | ${company.cnpj}\n${employee?.nome ?? s.nome_funcionario ?? "Funcionário"} | ${employee?.cargo ?? ""} | ${s.mes.slice(0, 7)}`,
+      182,
+    ) as string[];
+    doc.text(heading, 14, 23);
+    const startY = 23 + heading.length * 4.2 + 3;
+    const rows = exportRows(s, rules, employee, company);
+    autoTable(doc, {
+      startY,
+      margin: { left: 14, right: 14, bottom: 23 },
+      head: [["Dia", "Horário programado", "Horas", "Evento / observação"]],
+      body: rows.map((row) => [
+        row.Data.slice(8),
+        row.Horário,
+        row["Horas relógio"],
+        [row.Evento || row.Feriado, row.Observação].filter(Boolean).join(" · "),
+      ]),
+      theme: "grid",
+      styles: { fontSize: 8, cellPadding: 1.6, overflow: "linebreak" },
+      headStyles: { fillColor: [10, 57, 116] },
+      columnStyles: {
+        0: { cellWidth: 12 },
+        1: { cellWidth: 68 },
+        2: { cellWidth: 20 },
+      },
+    });
+    const finalY =
+      (doc as typeof doc & { lastAutoTable?: { finalY: number } }).lastAutoTable
+        ?.finalY ?? startY;
+    if (finalY > 252) doc.addPage();
+    const summaryY = finalY > 252 ? 18 : finalY + 7;
+    doc.setFontSize(8);
+    doc.text(
+      `Horas programadas: ${formatMinutes(result.clockTotal)} | Computadas: ${formatMinutes(result.total)}`,
+      14,
+      summaryY,
+    );
+    const note = result.alerts.length
+      ? `${result.alerts.length} alerta(s) na conferência. Consulte o relatório completo antes de aprovar.`
+      : "Sem alertas nos parâmetros cadastrados. Consulte a conferência completa.";
+    doc.text(doc.splitTextToSize(note, 182), 14, summaryY + 5);
+    for (let page = 1; page <= doc.getNumberOfPages(); page++) {
+      doc.setPage(page);
+      doc.setFontSize(7);
+      doc.text(
+        `Cont Contábil · ${options.preview ? "Prévia não salva" : scheduleStatusLabels[s.status ?? "rascunho"]}${s.revisao === undefined ? "" : ` · Revisão ${s.revisao}`} · Página ${page}/${doc.getNumberOfPages()}`,
+        14,
+        288,
+      );
+    }
+    return doc;
+  }
   doc.setFontSize(18);
   doc.text("Gerador de Jornadas", 14, 18);
   doc.setFontSize(10);
-  doc.text(`${company.nome} | CNPJ ${company.cnpj}`, 14, 26);
-  doc.text(
-    `${employee?.nome ?? s.nome_funcionario ?? ""} | ${employee?.cargo ?? ""} | ${s.mes.slice(0, 7)}`,
-    14,
-    32,
-  );
+  const identification = doc.splitTextToSize(
+    `${company.nome} | CNPJ ${company.cnpj}\n${employee?.nome ?? s.nome_funcionario ?? ""} | ${employee?.cargo ?? ""} | ${s.mes.slice(0, 7)}`,
+    182,
+  ) as string[];
+  doc.text(identification, 14, 26);
   const rows = exportRows(s, rules, employee, company);
   autoTable(doc, {
-    startY: 38,
+    startY: 29 + identification.length * 4.2,
     head: [["Data", "Horário", "Horas", "Feriado / evento"]],
     body: rows.map((r) => [
       r.Data,
@@ -262,7 +362,7 @@ export async function pdfDocument(
     doc.setPage(i);
     doc.setFontSize(8);
     doc.text(
-      `Gerado em ${new Date().toLocaleDateString("pt-BR", { timeZone: "America/Sao_Paulo" })} | Página ${i}/${doc.getNumberOfPages()}`,
+      `Cont Contábil · ${options.preview ? "Prévia não salva" : scheduleStatusLabels[s.status ?? "rascunho"]}${s.revisao === undefined ? "" : ` · Revisão ${s.revisao}`} | ${new Date().toLocaleDateString("pt-BR", { timeZone: "America/Sao_Paulo" })} | Página ${i}/${doc.getNumberOfPages()}`,
       14,
       288,
     );
@@ -274,9 +374,16 @@ export async function exportPDF(
   rules: LegalRule[],
   company: Company,
   employee?: Employee,
+  options: { compact?: boolean; preview?: boolean } = {},
 ) {
-  (await pdfDocument(s, rules, company, employee)).save(
-    `escala-${s.mes.slice(0, 7)}.pdf`,
+  (await pdfDocument(s, rules, company, employee, options)).save(
+    reportFilename(
+      options.compact ? "escala-compacta" : "escala",
+      s,
+      "pdf",
+      company,
+      employee,
+    ),
   );
 }
 
@@ -287,15 +394,7 @@ export async function exportTimesheetPDF(
   options: import("./timesheet").TimesheetOptions = {},
 ) {
   const { timesheetDocument } = await import("./timesheet-pdf");
-  const employeeName =
-    employee.nome
-      .normalize("NFD")
-      .replace(/[\u0300-\u036f]/g, "")
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, "-")
-      .replace(/^-|-$/g, "")
-      .slice(0, 60) || "funcionario";
   (await timesheetDocument(schedule, company, employee, options)).save(
-    `folha-de-ponto-${schedule.mes.slice(0, 7)}-${employeeName}.pdf`,
+    reportFilename("folha-de-ponto", schedule, "pdf", company, employee),
   );
 }

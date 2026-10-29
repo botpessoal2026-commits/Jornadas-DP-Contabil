@@ -9,6 +9,7 @@ import {
 import type { Data } from "./store";
 import type { Company, Employee, Model } from "./types";
 import { projectData } from "./special-dates";
+import { applicableHolidayDates } from "./workspace-improvements";
 
 export type CompanySituation = "ativa" | "inativa" | "arquivada";
 export type CompanyView =
@@ -19,7 +20,9 @@ export type CompanyView =
   | "feriados"
   | "regras"
   | "configuracoes"
-  | "historico";
+  | "historico"
+  | "operacoes"
+  | "relatorios";
 
 /** Missing legacy status means active; it is not an authorization decision. */
 export function companySituation(company: Company): CompanySituation {
@@ -72,6 +75,8 @@ export function scopeCompanyData(data: Data, companyId: string): Data {
       rules: [],
       specialDates: [],
       establishments: [],
+      operations: [],
+      scheduleVersions: [],
     };
   const employees = data.employees.filter(
     (entry) => entry.empresa_id === companyId,
@@ -80,6 +85,12 @@ export function scopeCompanyData(data: Data, companyId: string): Data {
   return {
     ...data,
     companies: [company],
+    operations: (data.operations ?? []).filter(
+      (entry) => entry.empresa_id === companyId,
+    ),
+    scheduleVersions: (data.scheduleVersions ?? []).filter(
+      (entry) => entry.empresa_id === companyId,
+    ),
     specialDates: (data.specialDates ?? []).filter(
       (event) => event.empresa_id === companyId,
     ),
@@ -220,8 +231,6 @@ export function companySummary(data: Data, company: Company, month: string) {
     pendingSources,
     unreadableSchedules: calculationErrors.length,
     calculationErrors,
-    applicableHolidays: scoped.holidays.filter((holiday) =>
-      holiday.data.startsWith(month.slice(0, 7)),
-    ).length,
+    applicableHolidays: applicableHolidayDates(scoped, company, month).length,
   };
 }
