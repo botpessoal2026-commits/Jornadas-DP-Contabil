@@ -2,6 +2,16 @@
 
 Base: `f6f75ef`. Branch: `codex/usuario-senha-persistencia`. O projeto confirmado pelo usuário é `vzlqsusuzqatoftrkosq`; não foi criado outro projeto nem substituída a identidade de contas existentes.
 
+## Correção da entrada e visualização de senha — 29/10/2026
+
+O campo de senha agora tem botão **Mostrar senha / Ocultar senha**, acessível por mouse, toque e teclado, nos modos de login, cadastro e definição de nova senha. O botão não envia o formulário, preserva o valor digitado e volta ao estado oculto ao trocar de modo. Capitalização automática, correção e verificação ortográfica permanecem desativadas mesmo com a senha visível. A senha digitada também passa a ser enviada integralmente, sem remover espaços das extremidades.
+
+A investigação do login reportado confirmou que o alias havia sido reservado, mas a conta ainda aguardava confirmação de e-mail. O gateway descartava o código `email_not_confirmed` e mostrava a mesma mensagem de senha incorreta. Agora preserva esse código internamente e responde `confirmation_required` somente quando o Supabase valida a senha e indica a pendência. Usuário inexistente e senha errada continuam recebendo o mesmo 401 genérico, sem e-mail ou identidade na resposta. A ordem da validação foi conferida na implementação do [Supabase Auth](https://github.com/supabase/auth/blob/master/internal/api/token.go#L177).
+
+A tela mantém a orientação **Confirme seu e-mail para ativar o acesso** após cadastro sem sessão ou login pendente. A ação **Reenviar confirmação** abre um formulário apenas com o e-mail informado pela própria pessoa e usa `auth.resend({type:'signup'})`. A resposta é genérica, sem consultar ou revelar um diretório de contas. O envio depende do clique da pessoa; nenhum e-mail real foi disparado pelos testes. Não houve confirmação administrativa, alteração de senhas ou desativação da verificação de e-mail.
+
+Arquivos desta correção: `auth-fields.tsx`, estilos em `globals.css`, integração em `workspace.tsx`, política em `auth-username-server.ts` e adaptador em `server/username-auth.ts`. Testes em `username-auth.test.ts`, `e2e/password-visibility.spec.ts` e `e2e/confirmation-flow.spec.ts`. Nenhuma migration ou regra de jornada foi alterada.
+
 ## Implementação
 
 - Entrada principal com **Usuário e Senha**. Nomes são normalizados para minúsculas e têm 3–32 caracteres ASCII (letras/números/ponto/hífen/sublinhado), com alguns nomes técnicos reservados.

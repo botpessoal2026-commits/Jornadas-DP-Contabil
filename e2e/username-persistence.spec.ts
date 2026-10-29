@@ -366,7 +366,9 @@ test("cadastro usa e-mail somente para confirmação e envia o nome solicitado a
     .fill("nova@example.invalid");
   await page.getByLabel("Senha", { exact: true }).fill("senha-nova-123");
   await page.getByRole("button", { name: "Criar conta", exact: true }).click();
-  await expect(page.getByRole("status")).toContainText("Confira seu e-mail");
+  await expect(
+    page.getByRole("status").filter({ hasText: "Cadastro solicitado." }),
+  ).toContainText("Confira seu e-mail");
   await expect(
     page.getByRole("button", { name: "Meu acesso", exact: true }),
   ).toHaveCount(0);

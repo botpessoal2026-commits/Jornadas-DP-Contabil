@@ -133,6 +133,7 @@ export function usernameLoginDependencies(): UsernameLoginDependencies | null {
           : null,
         userId: data.user?.id ?? null,
         status: error?.status,
+        errorCode: error?.code,
       };
     },
   };

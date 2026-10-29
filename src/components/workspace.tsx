@@ -389,6 +389,7 @@ export default function Workspace() {
     [modal, setModal] = useState<Modal | null>(null),
     [authMode, setAuthMode] = useState<AuthMode>("login");
   const [accountUsername, setAccountUsername] = useState<string | null>(null);
+  const [confirmationPending, setConfirmationPending] = useState(false);
   const [accountUsernameError, setAccountUsernameError] = useState<
     string | null
   >(null);
@@ -1849,7 +1850,7 @@ export default function Workspace() {
       if (!supabase)
         throw new Error("O Supabase ainda não está conectado a este ambiente.");
       const email = pick(fd, "email"),
-        password = pick(fd, "password");
+        password = String(fd.get("password") ?? "");
       const username = normalizeUsername(pick(fd, "username"));
       if (authMode === "signup") {
         const invalid = usernameError(username);
@@ -1862,34 +1863,69 @@ export default function Workspace() {
           );
       }
       const redirect = window.location.origin;
-      const result =
-        authMode === "signup"
-          ? await supabase.auth.signUp({
-              email,
-              password,
-              options: { emailRedirectTo: redirect, data: { username } },
-            })
-          : authMode === "reset"
-            ? await supabase.auth.resetPasswordForEmail(email, {
-                redirectTo: redirect,
+      try {
+        const result =
+          authMode === "signup"
+            ? await supabase.auth.signUp({
+                email,
+                password,
+                options: { emailRedirectTo: redirect, data: { username } },
               })
-            : authMode === "password"
-              ? await supabase.auth.updateUser({ password })
-              : authMode === "email-login"
-                ? await supabase.auth.signInWithPassword({ email, password })
-                : await signInWithUsername(supabase, username, password);
-      if (result.error) throw result.error;
-      notify(
-        authMode === "signup"
-          ? "Cadastro solicitado. Confira seu e-mail para confirmar o acesso; depois entre com seu usuário e senha."
-          : authMode === "reset"
-            ? "Se houver uma conta para esse e-mail, enviaremos as instruções."
-            : authMode === "password"
-              ? "Senha atualizada."
-              : "Acesso realizado.",
-      );
-      if (authMode === "password" || authMode === "signup")
-        setAuthMode("login");
+            : authMode === "resend"
+              ? await supabase.auth.resend({
+                  type: "signup",
+                  email,
+                  options: { emailRedirectTo: redirect },
+                })
+              : authMode === "reset"
+                ? await supabase.auth.resetPasswordForEmail(email, {
+                    redirectTo: redirect,
+                  })
+                : authMode === "password"
+                  ? await supabase.auth.updateUser({ password })
+                  : authMode === "email-login"
+                    ? await supabase.auth.signInWithPassword({
+                        email,
+                        password,
+                      })
+                    : await signInWithUsername(supabase, username, password);
+        if (result.error) throw result.error;
+        const session =
+          result.data && "session" in result.data ? result.data.session : null;
+        if (authMode === "signup") setConfirmationPending(!session);
+        else if (authMode === "login" || authMode === "email-login")
+          setConfirmationPending(false);
+        notify(
+          authMode === "signup"
+            ? session
+              ? "Conta criada. Acesso realizado."
+              : "Cadastro solicitado. Confira seu e-mail para confirmar o acesso; depois entre com seu usuário e senha."
+            : authMode === "resend"
+              ? "Se houver um cadastro pendente para esse e-mail, enviaremos uma nova confirmação. Confira também o spam."
+              : authMode === "reset"
+                ? "Se houver uma conta para esse e-mail, enviaremos as instruções."
+                : authMode === "password"
+                  ? "Senha atualizada."
+                  : "Acesso realizado.",
+        );
+        if (authMode === "password" || authMode === "signup")
+          setAuthMode("login");
+      } catch (error) {
+        const code =
+          error && typeof error === "object" && "code" in error
+            ? error.code
+            : null;
+        if (
+          code === "confirmation_required" ||
+          code === "email_not_confirmed"
+        ) {
+          setConfirmationPending(true);
+          throw new Error(
+            "Confirme seu e-mail para ativar o acesso. Se necessário, use Reenviar confirmação.",
+          );
+        }
+        throw error;
+      }
     });
   }
   async function formSubmit(event: FormEvent<HTMLFormElement>) {
@@ -2763,18 +2799,24 @@ export default function Workspace() {
             <h1>
               {authMode === "signup"
                 ? "Crie seu acesso"
-                : authMode === "reset"
-                  ? "Recupere seu acesso"
-                  : authMode === "password"
-                    ? "Defina uma nova senha"
-                    : "Bem-vindo ao seu DP"}
+                : authMode === "resend"
+                  ? "Reenvie a confirmação"
+                  : authMode === "reset"
+                    ? "Recupere seu acesso"
+                    : authMode === "password"
+                      ? "Defina uma nova senha"
+                      : "Bem-vindo ao seu DP"}
             </h1>
             <p className="subtitle">
               {authMode === "login"
                 ? "Entre com seu usuário e senha para acessar os cadastros e as escalas da sua conta."
                 : authMode === "email-login"
                   ? "Acesse sua conta existente e defina um usuário em Meu acesso. Seus dados serão mantidos."
-                  : "O e-mail é usado apenas no cadastro e na recuperação do acesso."}
+                  : authMode === "resend"
+                    ? "Informe o e-mail usado no cadastro para receber um novo link de ativação."
+                    : authMode === "signup"
+                      ? "Cadastre seu usuário e senha. Confirme o e-mail de cadastro para ativar o primeiro acesso."
+                      : "O e-mail é usado apenas no cadastro e na recuperação do acesso."}
             </p>
             {!supabase && (
               <div className="banner mt-6">
@@ -2785,6 +2827,28 @@ export default function Workspace() {
                 </div>
               </div>
             )}
+            {confirmationPending &&
+              (authMode === "login" || authMode === "email-login") && (
+                <div className="banner mt-6" role="status">
+                  <AlertTriangle size={18} />
+                  <div>
+                    <h2 className="text-sm font-semibold">
+                      Confirme seu e-mail para ativar o acesso
+                    </h2>
+                    <p className="text-sm mt-2">
+                      Abra o link enviado ao e-mail de cadastro e volte para
+                      entrar com seu usuário e senha. Confira também o spam.
+                    </p>
+                    <button
+                      type="button"
+                      className="button mt-3"
+                      onClick={() => setAuthMode("resend")}
+                    >
+                      Reenviar confirmação
+                    </button>
+                  </div>
+                </div>
+              )}
             <form onSubmit={authSubmit}>
               <AuthFields key={authMode} mode={authMode} />
               <button className="button primary" disabled={busy || !supabase}>
@@ -2793,11 +2857,13 @@ export default function Workspace() {
                 ) : null}
                 {authMode === "signup"
                   ? "Criar conta"
-                  : authMode === "reset"
-                    ? "Enviar instruções"
-                    : authMode === "password"
-                      ? "Salvar senha"
-                      : "Entrar"}
+                  : authMode === "resend"
+                    ? "Enviar confirmação"
+                    : authMode === "reset"
+                      ? "Enviar instruções"
+                      : authMode === "password"
+                        ? "Salvar senha"
+                        : "Entrar"}
                 <ArrowRight size={15} />
               </button>
             </form>
@@ -2805,10 +2871,18 @@ export default function Workspace() {
               <button
                 className="icon-button text-xs"
                 onClick={() =>
-                  setAuthMode(authMode === "signup" ? "login" : "signup")
+                  setAuthMode(
+                    authMode === "signup" || authMode === "resend"
+                      ? "login"
+                      : "signup",
+                  )
                 }
               >
-                {authMode === "signup" ? "Já tenho uma conta" : "Criar conta"}
+                {authMode === "signup"
+                  ? "Já tenho uma conta"
+                  : authMode === "resend"
+                    ? "Voltar ao login"
+                    : "Criar conta"}
               </button>
               <button
                 className="icon-button text-xs"
@@ -2821,6 +2895,16 @@ export default function Workspace() {
                   : "Esqueci minha senha"}
               </button>
             </div>
+            {!confirmationPending &&
+              (authMode === "login" || authMode === "email-login") && (
+                <button
+                  type="button"
+                  className="icon-button text-xs mt-3"
+                  onClick={() => setAuthMode("resend")}
+                >
+                  Reenviar confirmação
+                </button>
+              )}
             {(authMode === "login" || authMode === "email-login") && (
               <button
                 type="button"

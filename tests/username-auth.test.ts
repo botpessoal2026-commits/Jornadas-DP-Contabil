@@ -521,6 +521,85 @@ test("handler nunca entrega sessão de outro UID nem tokens de uma identidade n�
   }
 });
 
+test("confirmação pendente validada pelo Auth tem orientação própria sem sessão ou identidade exposta", async () => {
+  const { handler, waits } = handlerFixture({
+    async signIn() {
+      return {
+        tokens: null,
+        userId: null,
+        status: 400,
+        errorCode: "email_not_confirmed",
+      };
+    },
+  });
+  const response = await handler(request());
+  assert.equal(response.status, 403);
+  const body = await response.text();
+  assert.deepEqual(JSON.parse(body), {
+    error:
+      "Confirme seu e-mail para ativar o acesso. Se necessário, use Reenviar confirmação.",
+    code: "confirmation_required",
+  });
+  assert.doesNotMatch(
+    body,
+    /access-for-test|refresh-for-test|private-recovery|11111111|mariana/,
+  );
+  assert.match(response.headers.get("cache-control") ?? "", /no-store/);
+  assert.deepEqual(waits, [350]);
+});
+
+test("confirmação pendente nunca é deduzida de alias inexistente ou identidade ausente", async () => {
+  for (const missing of ["alias", "identity"]) {
+    const { handler, waits } = handlerFixture({
+      ...(missing === "alias"
+        ? {
+            async resolveUserId() {
+              return null;
+            },
+          }
+        : {
+            async getIdentity() {
+              return null;
+            },
+          }),
+      async signIn() {
+        return {
+          tokens: null,
+          userId: null,
+          status: 400,
+          errorCode: "email_not_confirmed",
+        };
+      },
+    });
+    const response = await handler(request());
+    assert.equal(response.status, 401);
+    assert.equal((await response.json()).code, "invalid_credentials");
+    assert.deepEqual(waits, [350]);
+  }
+});
+
+test("erro do provedor não libera tokens e senha incorreta continua genérica", async () => {
+  for (const errorCode of ["invalid_credentials", "email_not_confirmed"]) {
+    for (const result of [
+      { tokens: null, userId: null, status: 400, errorCode },
+      { tokens, userId, status: 400, errorCode },
+    ]) {
+      if (errorCode === "email_not_confirmed" && !result.tokens) continue;
+      const { handler } = handlerFixture({
+        async signIn() {
+          return result;
+        },
+      });
+      const response = await handler(request());
+      assert.equal(response.status, 401);
+      assert.deepEqual(await response.json(), {
+        error: "Usuário ou senha inválidos.",
+        code: "invalid_credentials",
+      });
+    }
+  }
+});
+
 test("limiter distribuído bloqueia antes da identidade e informa Retry-After limitado", async () => {
   for (const [reported, expected] of [
     [12.2, "13"],

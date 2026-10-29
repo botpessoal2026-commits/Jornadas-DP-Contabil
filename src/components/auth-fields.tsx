@@ -1,10 +1,11 @@
 "use client";
 
-import { useId } from "react";
+import { useId, useState } from "react";
+import { Eye, EyeOff } from "lucide-react";
 import { usernameError } from "@/lib/auth-username";
 
 export type AuthMode =
-  "login" | "email-login" | "signup" | "reset" | "password";
+  "login" | "email-login" | "signup" | "reset" | "resend" | "password";
 
 function UsernameField({
   username,
@@ -46,6 +47,48 @@ function UsernameField({
   );
 }
 
+function PasswordField({ newPassword }: { newPassword: boolean }) {
+  const id = useId();
+  const [visible, setVisible] = useState(false);
+  const action = visible ? "Ocultar senha" : "Mostrar senha";
+  return (
+    <div className="auth-field auth-password-field">
+      <label htmlFor={`${id}-password`}>Senha</label>
+      <div className="auth-password-control">
+        <input
+          id={`${id}-password`}
+          name="password"
+          type={visible ? "text" : "password"}
+          required
+          minLength={newPassword ? 8 : undefined}
+          maxLength={1024}
+          autoComplete={newPassword ? "new-password" : "current-password"}
+          autoCapitalize="none"
+          autoCorrect="off"
+          spellCheck={false}
+          placeholder={newPassword ? "Pelo menos 8 caracteres" : "Sua senha"}
+        />
+        <button
+          className="auth-password-toggle"
+          type="button"
+          aria-label={action}
+          aria-pressed={visible}
+          aria-controls={`${id}-password`}
+          title={action}
+          onMouseDown={(event) => event.preventDefault()}
+          onClick={() => setVisible((value) => !value)}
+        >
+          {visible ? (
+            <EyeOff size={19} aria-hidden="true" />
+          ) : (
+            <Eye size={19} aria-hidden="true" />
+          )}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 /** Fields only: the parent keeps submit, account state and error handling. */
 export default function AuthFields({ mode }: { mode: AuthMode }) {
   const id = useId();
@@ -53,7 +96,10 @@ export default function AuthFields({ mode }: { mode: AuthMode }) {
   return (
     <>
       {(mode === "login" || mode === "signup") && <UsernameField key={mode} />}
-      {(mode === "email-login" || mode === "signup" || mode === "reset") && (
+      {(mode === "email-login" ||
+        mode === "signup" ||
+        mode === "reset" ||
+        mode === "resend") && (
         <div className="auth-field">
           <label htmlFor={`${id}-email`}>
             {mode === "signup" ? "E-mail para recuperação" : "E-mail"}
@@ -82,21 +128,8 @@ export default function AuthFields({ mode }: { mode: AuthMode }) {
           )}
         </div>
       )}
-      {mode !== "reset" && (
-        <label htmlFor={`${id}-password`}>
-          Senha
-          <input
-            key={mode}
-            id={`${id}-password`}
-            name="password"
-            type="password"
-            required
-            minLength={newPassword ? 8 : undefined}
-            maxLength={1024}
-            autoComplete={newPassword ? "new-password" : "current-password"}
-            placeholder={newPassword ? "Pelo menos 8 caracteres" : "Sua senha"}
-          />
-        </label>
+      {mode !== "reset" && mode !== "resend" && (
+        <PasswordField key={mode} newPassword={newPassword} />
       )}
     </>
   );

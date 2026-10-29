@@ -19,6 +19,7 @@ export type UsernameLoginDependencies = {
     tokens: UsernameLoginTokens | null;
     userId: string | null;
     status?: number;
+    errorCode?: string;
   }>;
   clientIp: (request: Request) => string;
   now?: () => number;
@@ -172,7 +173,24 @@ export function createUsernameSignInHandler(
           60,
         );
       if (result.status && result.status >= 500) return unavailable();
-      if (!userId || !identity || !result.tokens || result.userId !== userId)
+      if (!userId || !identity) return invalid();
+      // Supabase Auth checks the password before email_not_confirmed in its
+      // password grant. Do not infer confirmation status from the alias lookup
+      // or administrator profile, which would disclose accounts to strangers.
+      if (
+        result.status === 400 &&
+        result.errorCode === "email_not_confirmed" &&
+        !result.tokens &&
+        !result.userId
+      ) {
+        await wait(Math.max(0, 350 - (now() - start)));
+        return reply(403, {
+          error:
+            "Confirme seu e-mail para ativar o acesso. Se necessário, use Reenviar confirmação.",
+          code: "confirmation_required",
+        });
+      }
+      if (result.errorCode || !result.tokens || result.userId !== userId)
         return invalid();
       return reply(200, result.tokens);
     } catch {
