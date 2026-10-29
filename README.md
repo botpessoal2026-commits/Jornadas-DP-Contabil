@@ -107,7 +107,7 @@ Variáveis do frontend:
 - `NEXT_PUBLIC_SUPABASE_URL`: URL HTTPS do projeto.
 - `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`: chave publicável do Supabase. Em projetos antigos pode receber a chave `anon`, jamais `service_role` ou chave secreta.
 
-As variáveis `NEXT_PUBLIC_` são públicas e incorporadas no build. Depois de alterá-las na Vercel, faça novo deploy. Não comite `.env.local` nem credenciais. Este aplicativo não precisa de chave administrativa em produção.
+As variáveis `NEXT_PUBLIC_` são públicas e incorporadas no build. Depois de alterá-las na Vercel, faça novo deploy. Não comite `.env.local` nem credenciais. O acesso por usuário requer também `SUPABASE_SECRET_KEY` (ou o legado `SUPABASE_SERVICE_ROLE_KEY`) somente no servidor, para resolução privada do usuário e limites de tentativas; nunca use `NEXT_PUBLIC_` nessa chave. O acesso das contas existentes por e-mail permanece disponível.
 
 ## Banco e autenticação
 
