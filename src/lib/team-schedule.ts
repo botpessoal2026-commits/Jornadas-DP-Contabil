@@ -30,6 +30,70 @@ export type TeamRow = {
   days: TeamDay[];
 };
 
+export type TeamFilters = {
+  query?: string;
+  sector?: string;
+  establishmentId?: string;
+  regime?: string;
+  status?: "all" | "active" | "inactive";
+  schedule?: "all" | "missing" | "violation" | "attention";
+};
+
+function normalized(value: string) {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLocaleLowerCase("pt-BR")
+    .trim();
+}
+
+/** Filters saved calendars, never inferring rest from a missing record. */
+export function filterTeamRows(
+  rows: TeamRow[],
+  filters: TeamFilters,
+  models: Data["models"] = [],
+): TeamRow[] {
+  const query = normalized(filters.query ?? "");
+  return rows.filter((row) => {
+    const active =
+      row.employee.situacao !== "inativo" &&
+      (row.company.situacao ?? "ativa") === "ativa";
+    const model = models.find(
+      (entry) =>
+        entry.id ===
+          (row.schedule?.modelo_id ??
+            row.employee.modelo_padrao_id ??
+            row.company.modelo_padrao_id) &&
+        (entry.empresa_id === row.company.id || entry.empresa_id === null),
+    );
+    return (
+      (!query ||
+        normalized(
+          `${row.employee.nome} ${row.employee.matricula ?? ""} ${row.employee.setor ?? ""} ${row.company.nome}`,
+        ).includes(query)) &&
+      (!filters.sector || row.employee.setor === filters.sector) &&
+      (!filters.establishmentId ||
+        (filters.establishmentId === "__main"
+          ? !row.employee.estabelecimento_id
+          : row.employee.estabelecimento_id === filters.establishmentId)) &&
+      (!filters.regime ||
+        (row.schedule?.modelo_tipo ?? model?.tipo) === filters.regime) &&
+      (!filters.status ||
+        filters.status === "all" ||
+        (filters.status === "active" ? active : !active)) &&
+      (!filters.schedule ||
+        filters.schedule === "all" ||
+        (filters.schedule === "missing"
+          ? row.days.some((day) => day.state === "missing")
+          : row.days.some(
+              (day) =>
+                day.problem ===
+                (filters.schedule === "violation" ? "violation" : "attention"),
+            )))
+    );
+  });
+}
+
 /** Read only saved, authorized schedules with a matching company/employee pair. */
 export function teamScheduleRows(
   data: Data,

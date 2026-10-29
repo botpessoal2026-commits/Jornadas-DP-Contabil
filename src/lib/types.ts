@@ -163,6 +163,22 @@ export type Schedule = {
   nome_funcionario?: string;
   modelo_nome?: string;
   modelo_tipo?: Model["tipo"];
+  /** Optional for legacy rows; the server increments this on every change. */
+  revisao?: number;
+  status?: ScheduleStatus;
+  ultima_justificativa?: string;
+  conferido_em?: string | null;
+  conferido_por?: string | null;
+  conferencia?: ScheduleReview | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+};
+export type ScheduleStatus =
+  "rascunho" | "em_revisao" | "aprovada" | "publicada" | "fechada";
+export type ScheduleReview = {
+  conferida: boolean;
+  impedimentos: number;
+  fontes_pendentes: number;
 };
 export type Alert = {
   ruleId?: string;

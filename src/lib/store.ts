@@ -7,8 +7,12 @@ import type {
   LegalRule,
   Model,
   Schedule,
+  ScheduleReview,
+  ScheduleStatus,
   SpecialDate,
 } from "./types";
+import type { CompanyOperation } from "./company-operations";
+import type { ScheduleVersion } from "./schedule-governance";
 import { initialHolidays, initialModels, initialRules } from "./presets";
 export type AuditLog = {
   id: string;
@@ -32,6 +36,11 @@ export type Data = {
   logs: AuditLog[];
   specialDates?: SpecialDate[];
   establishments?: Establishment[];
+  operations?: CompanyOperation[];
+  scheduleVersions?: ScheduleVersion[];
+  schemaWarnings?: string[];
+  /** Present only when a caller explicitly requests a limited period. */
+  scheduleWindow?: [from: string, to: string];
 };
 export const emptyData: Data = {
   companies: [],
@@ -43,8 +52,64 @@ export const emptyData: Data = {
   logs: [],
   specialDates: [],
   establishments: [],
+  operations: [],
+  scheduleVersions: [],
+  schemaWarnings: [],
 };
-export async function loadData(companyId?: string | null): Promise<Data> {
+type PageResponse<T> = {
+  data: T[] | null;
+  error: { message: string; code?: string } | null;
+  count?: number | null;
+};
+/** Stable ordering belongs to the query; advance by actual rows, even on a lower API cap. */
+export async function readAllPages<T>(
+  readPage: (from: number, to: number) => PromiseLike<PageResponse<T>>,
+  pageSize = 500,
+): Promise<T[]> {
+  const rows: T[] = [];
+  for (let page = 0; page < 1000; page++) {
+    const result = await readPage(rows.length, rows.length + pageSize - 1);
+    if (result.error)
+      throw Object.assign(new Error(result.error.message), {
+        code: result.error.code,
+      });
+    const data = result.data ?? [];
+    rows.push(...data);
+    if (result.count != null && rows.length >= result.count) return rows;
+    if (result.count == null && data.length < pageSize) return rows;
+    if (!data.length)
+      throw new Error(
+        "A consulta foi interrompida antes de carregar todos os registros. Tente atualizar os dados.",
+      );
+  }
+  throw new Error(
+    "O volume consultado excede o limite seguro. Selecione uma empresa e competência.",
+  );
+}
+export function scheduleMonthWindow(month: string) {
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month))
+    throw new Error("Competência inválida.");
+  const [year, number] = month.split("-").map(Number);
+  const at = (offset: number) => {
+    const date = new Date(Date.UTC(year, number - 1 + offset, 1));
+    return date.toISOString().slice(0, 10);
+  };
+  return { from: at(-1), to: at(1) };
+}
+function migrationError(error: unknown) {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    ["42P01", "42703", "42883", "PGRST202", "PGRST205"].includes(
+      String(error.code),
+    )
+  );
+}
+export async function loadData(
+  companyId?: string | null,
+  month?: string,
+): Promise<Data> {
   if (!supabase) throw new Error("Configure o Supabase.");
   if (
     companyId &&
@@ -55,11 +120,17 @@ export async function loadData(companyId?: string | null): Promise<Data> {
     throw new Error("Empresa indisponível ou sem permissão.");
   // Keep the authorized directory for the selector, then restrict resource
   // queries at the API boundary rather than loading another company's records.
+  const client = supabase;
   const directory = companyId
-    ? await supabase.from("empresas").select("*")
+    ? await readAllPages<Company>((from, to) =>
+        client
+          .from("empresas")
+          .select("*", { count: "exact" })
+          .order("id")
+          .range(from, to),
+      )
     : null;
-  if (directory?.error) throw new Error(directory.error.message);
-  if (companyId && !directory?.data?.some((row) => row.id === companyId))
+  if (companyId && !directory?.some((row) => row.id === companyId))
     throw new Error("Empresa indisponível ou sem permissão.");
   const tables = [
     "empresas",
@@ -72,48 +143,95 @@ export async function loadData(companyId?: string | null): Promise<Data> {
     "datas_especiais",
     "estabelecimentos",
   ];
+  const window = month ? scheduleMonthWindow(month) : null;
   const responses = await Promise.all(
     tables.map((t) => {
       if (t === "empresas" && directory) return directory;
-      let query =
-        t === "escalas"
-          ? supabase!
-              .from(t)
-              .select(
-                "*,dias:escala_dias(data,intervalos,folga,feriado,observacao,calendario)",
-              )
-          : t === "log_alteracoes"
-            ? supabase!
+      if (t === "log_alteracoes") {
+        let query = client
+          .from(t)
+          .select(
+            "id,tabela,acao,alterado_em,registro_id,empresa_id,ator_id,antes,depois,campos",
+          )
+          .order("alterado_em", { ascending: false })
+          .order("id", { ascending: false })
+          .limit(100);
+        if (companyId) query = query.eq("empresa_id", companyId);
+        return query.then((response) => {
+          if (response.error) throw new Error(response.error.message);
+          return response.data;
+        });
+      }
+      return readAllPages((from, to) => {
+        let query =
+          t === "escalas"
+            ? client
                 .from(t)
                 .select(
-                  "id,tabela,acao,alterado_em,registro_id,empresa_id,ator_id,antes,depois,campos",
+                  "*,dias:escala_dias(data,intervalos,folga,feriado,observacao,calendario)",
+                  { count: "exact" },
                 )
-                .order("alterado_em", { ascending: false })
-                .limit(100)
-            : supabase!.from(t).select("*");
-      if (companyId) {
-        if (
-          [
-            "funcionarios",
-            "escalas",
-            "log_alteracoes",
-            "datas_especiais",
-            "estabelecimentos",
-          ].includes(t)
-        )
-          query = query.eq("empresa_id", companyId);
-        else if (
-          ["modelos_jornada", "parametros_legais", "feriados"].includes(t)
-        )
-          query = query.or(`empresa_id.eq.${companyId},empresa_id.is.null`);
-      }
-      return query;
+            : client.from(t).select("*", { count: "exact" });
+        if (t === "escalas" && window)
+          query = query.gte("mes", window.from).lte("mes", window.to);
+        if (companyId) {
+          if (
+            [
+              "funcionarios",
+              "escalas",
+              "log_alteracoes",
+              "datas_especiais",
+              "estabelecimentos",
+            ].includes(t)
+          )
+            query = query.eq("empresa_id", companyId);
+          else if (
+            ["modelos_jornada", "parametros_legais", "feriados"].includes(t)
+          )
+            query = query.or(`empresa_id.eq.${companyId},empresa_id.is.null`);
+        }
+        return query.order("id").range(from, to);
+      });
     }),
   );
-  for (const r of responses) if (r.error) throw new Error(r.error.message);
-  return Object.fromEntries(
-    Object.keys(emptyData).map((k, i) => [k, responses[i].data]),
-  ) as Data;
+  const keys = [
+    "companies",
+    "employees",
+    "models",
+    "rules",
+    "holidays",
+    "schedules",
+    "logs",
+    "specialDates",
+    "establishments",
+  ];
+  const data = Object.fromEntries(
+    keys.map((key, i) => [key, responses[i]]),
+  ) as unknown as Data;
+  const schemaWarnings: string[] = [];
+  try {
+    data.operations = await readAllPages<CompanyOperation>((from, to) => {
+      let query = client
+        .from("registros_operacionais")
+        .select("*", { count: "exact" });
+      if (companyId) query = query.eq("empresa_id", companyId);
+      return query.order("id").range(from, to);
+    });
+  } catch (error) {
+    if (!migrationError(error)) throw error;
+    data.operations = [];
+    schemaWarnings.push(
+      "Atualização do banco pendente: operações e governança exigem a migração mais recente.",
+    );
+  }
+  return {
+    ...data,
+    scheduleVersions: [],
+    schemaWarnings,
+    ...(window
+      ? { scheduleWindow: [window.from, window.to] as [string, string] }
+      : {}),
+  };
 }
 export async function saveRow(table: string, value: object, id?: string) {
   if (!supabase) throw new Error("Supabase não configurado.");
@@ -175,6 +293,11 @@ export async function saveSchedules(
     modelo_nome: schedule.modelo_nome,
     modelo_tipo: schedule.modelo_tipo,
     dias: schedule.dias,
+    ...(schedule.revisao !== undefined
+      ? { revisao_esperada: schedule.revisao }
+      : !schedule.id
+        ? { revisao_esperada: null }
+        : {}),
   }));
   const { error } = companyId
     ? await supabase.rpc("salvar_escalas_empresa", {
@@ -183,6 +306,182 @@ export async function saveSchedules(
       })
     : await supabase.rpc("salvar_escalas", { itens });
   if (error) throw new Error(error.message);
+}
+export async function transitionScheduleStatus(
+  companyId: string,
+  schedule: Schedule,
+  next: ScheduleStatus,
+  reason: string,
+  review: ScheduleReview,
+) {
+  if (!supabase) throw new Error("Supabase não configurado.");
+  if (schedule.revisao === undefined)
+    throw new Error(
+      "Atualize os dados e aplique a migração de governança antes de alterar a situação.",
+    );
+  const { error } = await supabase.rpc("alterar_status_escala", {
+    p_empresa: companyId,
+    p_escala: schedule.id,
+    p_status: next,
+    p_revisao: schedule.revisao,
+    p_justificativa: reason.trim(),
+    p_conferencia: review,
+  });
+  if (error) {
+    if (migrationError(error))
+      throw new Error(
+        "Atualização do banco pendente: aplique a migração de governança.",
+      );
+    throw new Error(error.message);
+  }
+}
+export async function loadScheduleVersions(
+  companyId: string,
+  scheduleId: string,
+): Promise<ScheduleVersion[]> {
+  if (!supabase) throw new Error("Supabase não configurado.");
+  const client = supabase;
+  try {
+    return await readAllPages<ScheduleVersion>((from, to) =>
+      client
+        .from("escala_versoes")
+        .select(
+          "id,escala_id,empresa_id,revisao,versao,publicado_em,publicado_por,justificativa,snapshot",
+          { count: "exact" },
+        )
+        .eq("empresa_id", companyId)
+        .eq("escala_id", scheduleId)
+        .order("versao", { ascending: false })
+        .range(from, to),
+    );
+  } catch (error) {
+    if (migrationError(error))
+      throw new Error(
+        "Atualização do banco pendente: as versões exigem a migração de governança.",
+      );
+    throw error;
+  }
+}
+export async function saveCompanyOperation(
+  companyId: string,
+  operation: CompanyOperation,
+) {
+  if (!supabase) throw new Error("Supabase não configurado.");
+  if (operation.empresa_id !== companyId)
+    throw new Error("A operação deve pertencer à empresa ativa.");
+  const { data, error } = await supabase.rpc("salvar_operacao_empresa", {
+    p_empresa: companyId,
+    p_id: operation.id || null,
+    p_valores: {
+      tipo: operation.tipo,
+      status: operation.status,
+      titulo: operation.titulo,
+      funcionario_id: operation.funcionario_id,
+      data_inicio: operation.data_inicio,
+      data_fim: operation.data_fim,
+      payload: operation.payload,
+    },
+  });
+  if (error) {
+    if (migrationError(error))
+      throw new Error(
+        "Atualização do banco pendente: aplique a migração de operações.",
+      );
+    throw new Error(error.message);
+  }
+  return data as string;
+}
+export async function deleteCompanyOperation(companyId: string, id: string) {
+  if (!supabase) throw new Error("Supabase não configurado.");
+  const { error } = await supabase.rpc("excluir_operacao_empresa", {
+    p_empresa: companyId,
+    p_id: id,
+  });
+  if (error) throw new Error(error.message);
+}
+export async function applyCompanySwap(
+  companyId: string,
+  operation: CompanyOperation,
+  schedules: Schedule[],
+) {
+  if (!supabase) throw new Error("Supabase não configurado.");
+  if (
+    operation.empresa_id !== companyId ||
+    operation.tipo !== "troca" ||
+    operation.status !== "pendente" ||
+    schedules.length !== 2 ||
+    schedules.some(
+      (entry) => entry.empresa_id !== companyId || entry.revisao === undefined,
+    )
+  )
+    throw new Error(
+      "Carregue a solicitação pendente e as duas escalas desta empresa antes de aplicar a troca.",
+    );
+  const { error } = await supabase.rpc("aplicar_troca_empresa", {
+    p_empresa: companyId,
+    p_operacao: operation.id,
+    p_itens: schedules.map((schedule) => ({
+      id: schedule.id,
+      empresa_id: schedule.empresa_id,
+      funcionario_id: schedule.funcionario_id,
+      modelo_id: schedule.modelo_id,
+      mes: schedule.mes,
+      nome_funcionario: schedule.nome_funcionario,
+      modelo_nome: schedule.modelo_nome ?? "",
+      modelo_tipo: schedule.modelo_tipo ?? "personalizado",
+      dias: schedule.dias,
+      revisao_esperada: schedule.revisao,
+    })),
+  });
+  if (error) {
+    if (migrationError(error))
+      throw new Error(
+        "Atualização do banco pendente: aplique a migração de operações para trocar plantões.",
+      );
+    throw new Error(error.message);
+  }
+}
+export async function importCompanyEmployees(
+  companyId: string,
+  employees: Employee[],
+): Promise<string[]> {
+  if (!supabase) throw new Error("Supabase não configurado.");
+  if (employees.some((employee) => employee.empresa_id !== companyId))
+    throw new Error("Todos os funcionários devem pertencer à empresa ativa.");
+  const fields: (keyof Employee)[] = [
+    "nome",
+    "cpf",
+    "cargo",
+    "horario_contratual",
+    "carga_semanal_minutos",
+    "dias_descanso",
+    "matricula",
+    "setor",
+    "admissao",
+    "situacao",
+    "modelo_padrao_id",
+    "carga_diaria_minutos",
+    "regras_especiais",
+    "estabelecimento_id",
+  ];
+  const { data, error } = await supabase.rpc("importar_funcionarios_empresa", {
+    p_empresa: companyId,
+    p_itens: employees.map((employee) =>
+      Object.fromEntries(
+        fields
+          .filter((field) => employee[field] !== undefined)
+          .map((field) => [field, employee[field]]),
+      ),
+    ),
+  });
+  if (error) {
+    if (migrationError(error))
+      throw new Error(
+        "Atualização do banco pendente: aplique a migração para importar funcionários.",
+      );
+    throw new Error(error.message);
+  }
+  return data as string[];
 }
 export async function importDefaults(data: Data) {
   if (!supabase) throw new Error("Supabase não configurado.");

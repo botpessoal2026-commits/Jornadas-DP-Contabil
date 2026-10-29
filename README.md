@@ -10,6 +10,20 @@ Aplicação em português para o Departamento Pessoal organizar empresas, funcio
 - Criação do projeto Supabase, aplicação da migration no serviço e publicação Vercel dependem do acesso às respectivas contas. Nenhum projeto pago é criado pelo código.
 - A correção do 12×36 conferiu a CLT, art. 59-A, e a EC nº 141/2026 nas fontes oficiais. O validador específico observa as vigências de 16/12/2026 e 16/12/2027. Os antigos cenários demonstrativos de jornadas comuns continuam sendo fixtures ilustrativas, sem atualização automática de datas ou de regras cadastradas. Nenhum cadastro remoto foi alterado.
 
+## Melhorias da revisão — 29/10/2026
+
+Esta etapa acrescenta filtros e tabelas, duração contratual HH:MM, importação de funcionários, grade editável, operações em lote, calendário compacto/semanal, ações fixas e tema escuro. A central de relatórios oferece preview, PDF compacto/completo, ZIP, XLSX/CSV consolidados e ICS. A folha individual A4 permanece preservada.
+
+Escalas têm revisão concorrente e fluxo de rascunho, revisão, aprovação, publicação e fechamento, com versões congeladas e reabertura justificada. O módulo operacional registra ausências, cobertura, documentos, solicitações de troca e marcações informadas/importadas; não inventa ponto real nem calcula pagamentos. A fila do escritório abre cada pendência no contexto correto.
+
+A migration nova é `20261028122734_schedule_governance_operations.sql`, preparada e testada localmente, sem aplicação remota. A demonstração continua fictícia; a recuperação de prévias no navegador é opcional, isolada por conta/empresa/pessoa/mês e expira em sete dias. Não altera a persistência do cadastro.
+
+O [quadro de execução dos 65 itens](docs/MELHORIAS_REVISAO.md) distingue implementado, parcial e planejado. Colaboração por convites, portal do funcionário, integração oficial com folha, backup/restauração e otimizador completo continuam no roadmap; não são anunciados como funcionalidades entregues.
+
+Validação desta entrega: **256 testes unitários/de banco embarcado e 70 cenários de navegador aprovados**. A suíte completa teve 68 aprovações; os dois casos corrigidos e outros 16 cenários afetados passaram na reexecução focada. Build, TypeScript, Prettier e `git diff --check` passaram. Telas revisadas em desktop e 375px, com modo compacto, tema escuro, ações fixas e sem transbordamento horizontal. Auth e persistência no serviço remoto não foram homologados com contas reais.
+
+As seções seguintes registram etapas anteriores. Números de testes e limitações ali descritos correspondem à data da respectiva etapa; o quadro acima e a validação do PR representam a situação atual.
+
 ## Validação do regime 12×36
 
 O modelo é identificado pelo campo estruturado `tipo`, já existente, e a regra correspondente usa `chave: regime` com `valor.tipo_regime: 12x36`. Regras comuns legadas continuam comuns. Os dois tipos têm seleção por vigência e personalização por empresa independentes; configurar 12×36 não amplia o limite de funcionários com jornadas comuns. A migration `20261026115657_regime_12x36_scope.sql` modifica apenas os dois índices de unicidade dos parâmetros, permitindo ambos os regimes na mesma data. Não altera linhas existentes, vínculos ou políticas de acesso.
@@ -42,7 +56,7 @@ O calendário e a grade mantêm os alertas existentes, com bordas vermelha/âmba
 
 A migration `20261026173250_special_dates_calendar.sql` acrescenta `datas_especiais`, `estabelecimentos`, vínculo opcional do funcionário e metadados do dia com programação original/exceção/política de dispensa. RLS, FKs e RPCs com contexto explícito validam proprietário, empresa, unidade e funcionários, além de períodos, recorrência, horários e duplicidades. Eventos anuais usam identidade independente do ano de origem; grupos grandes não excedem o tamanho dos índices. A gravação da escala continua atômica. Os dados anteriores não são convertidos ou substituídos.
 
-A persistência real usa o Supabase existente. A demonstração continua em memória e retorna aos dados fictícios iniciais ao recarregar. Os testes locais verificam migrations reais em PostgreSQL embarcado, inclusive fechamento/reabertura do banco, e o fluxo de recarga do navegador com transporte Supabase simulado. Auth e persistência no serviço remoto não são certificados por esses testes. O banco remoto e a produção não foram alterados; a sequência de migrations precisa ser aplicada antes de usar os novos campos com dados reais. A aplicação possui atualmente tema claro; a verificação responsiva contempla esse tema e telas de 375px.
+A persistência real usa o Supabase existente. A demonstração continua em memória e retorna aos dados fictícios iniciais ao recarregar. Os testes locais verificam migrations reais em PostgreSQL embarcado, inclusive fechamento/reabertura do banco, e o fluxo de recarga do navegador com transporte Supabase simulado. Auth e persistência no serviço remoto não são certificados por esses testes. O banco remoto e a produção não foram alterados; a sequência de migrations precisa ser aplicada antes de usar os novos campos com dados reais. Na etapa de datas especiais havia apenas tema claro. A revisão posterior acrescenta tema escuro opcional; ambos preservam a impressão para papel.
 
 Validação desta etapa: **192 testes unitários/de PostgreSQL embarcado e 53 cenários de navegador aprovados**, além de build, TypeScript, formatação e `git diff --check`. Os cenários cobrem os 22 requisitos de verificação do pedido, incluindo legado, duas empresas, unidades municipais, exceções, recessos, pontos facultativos, feriados trabalhados, recorrência, virada de mês/ano, horários noturnos, exportações reais, recarga com transporte simulado e persistência após reabrir o banco. As telas foram revisadas no computador e em 375px, sem rolagem horizontal; o exemplo da folha conserva 31 dias e assinatura em uma página A4. Os limites de verificação remota e de tema disponíveis estão descritos acima.
 
@@ -59,7 +73,7 @@ cp .env.example .env.local
 npm run dev
 ```
 
-Para testar a interface sem Supabase, abra a aplicação e clique em **Explorar demonstração**. As alterações desaparecem ao sair ou recarregar. O cenário demonstrativo é dezembro de 2026; contas reais começam no mês atual de São Paulo.
+Para testar a interface sem Supabase, abra a aplicação e clique em **Explorar demonstração**. Cadastros desaparecem ao sair ou recarregar; a recuperação opcional de prévias locais é descrita acima. O cenário demonstrativo é dezembro de 2026; contas reais começam no mês atual de São Paulo.
 
 Variáveis do frontend:
 

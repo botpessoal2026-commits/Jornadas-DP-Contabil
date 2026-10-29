@@ -3,6 +3,7 @@ import { useId, useState } from "react";
 import type { Company, Employee, Model, Establishment } from "@/lib/types";
 import { formatCpf } from "@/lib/cpf";
 import { modelsForCompany } from "@/lib/company-resources";
+import { contractDurationText } from "@/lib/contract";
 
 type CompanyDefaults = Company & {
   situacao?: "ativa" | "inativa" | "arquivada";
@@ -34,8 +35,7 @@ const days = [
   "Sexta",
   "Sábado",
 ];
-const hours = (minutes?: number | null) =>
-  typeof minutes === "number" ? String(minutes / 60) : "";
+const hours = contractDurationText;
 
 /** Company and individual defaults are initial values, never bulk updates. */
 export default function EmployeeFields({
@@ -69,6 +69,16 @@ export default function EmployeeFields({
     ),
   );
   const [weeklyTouched, setWeeklyTouched] = useState(false);
+  const [companySearch, setCompanySearch] = useState("");
+  const [modelSearch, setModelSearch] = useState("");
+  const match = (text: string, query: string) =>
+    text
+      .normalize("NFD")
+      .replace(/\p{M}/gu, "")
+      .toLowerCase()
+      .includes(
+        query.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase().trim(),
+      );
   const availableModels = modelsForCompany(models, selectedCompany, [
     employee?.modelo_padrao_id,
     company?.modelo_padrao_id,
@@ -78,6 +88,17 @@ export default function EmployeeFields({
   );
   return (
     <>
+      {!fixedCompany && companies.length > 8 && (
+        <label className="span2">
+          Pesquisar empresa do vínculo
+          <input
+            type="search"
+            value={companySearch}
+            onChange={(event) => setCompanySearch(event.target.value)}
+            placeholder="Nome, CNPJ ou código"
+          />
+        </label>
+      )}
       <label htmlFor={`${id}-company`}>
         Empresa
         <select
@@ -108,6 +129,14 @@ export default function EmployeeFields({
                 item.id === selectedCompany ||
                 !item.situacao ||
                 item.situacao === "ativa",
+            )
+            .filter(
+              (item) =>
+                item.id === selectedCompany ||
+                match(
+                  `${item.nome} ${item.cnpj} ${item.codigo_interno ?? ""}`,
+                  companySearch,
+                ),
             )
             .map((item) => (
               <option key={item.id} value={item.id}>
@@ -225,6 +254,17 @@ export default function EmployeeFields({
           <option value="inativo">Inativo</option>
         </select>
       </label>
+      {availableModels.length > 8 && (
+        <label className="span2">
+          Pesquisar modelo individual
+          <input
+            type="search"
+            value={modelSearch}
+            onChange={(event) => setModelSearch(event.target.value)}
+            placeholder="Nome ou regime da jornada"
+          />
+        </label>
+      )}
       <label htmlFor={`${id}-model`}>
         Modelo individual de jornada
         <select
@@ -234,21 +274,27 @@ export default function EmployeeFields({
           onChange={(event) => setSelectedModel(event.target.value)}
         >
           <option value="">Herdar padrão da empresa</option>
-          {availableModels.map((model) => (
-            <option
-              key={model.id}
-              value={model.id}
-              disabled={
-                !model.empresa_id && model.id !== employee?.modelo_padrao_id
-              }
-            >
-              {model.nome}
-              {model.empresa_id ? "" : " · biblioteca vinculada (legado)"}
-              {model.tipo === "6x1" && !company?.permite_6x1
-                ? " — depende de autorização da empresa"
-                : ""}
-            </option>
-          ))}
+          {availableModels
+            .filter(
+              (item) =>
+                item.id === selectedModel ||
+                match(`${item.nome} ${item.tipo}`, modelSearch),
+            )
+            .map((model) => (
+              <option
+                key={model.id}
+                value={model.id}
+                disabled={
+                  !model.empresa_id && model.id !== employee?.modelo_padrao_id
+                }
+              >
+                {model.nome}
+                {model.empresa_id ? "" : " · biblioteca vinculada (legado)"}
+                {model.tipo === "6x1" && !company?.permite_6x1
+                  ? " — depende de autorização da empresa"
+                  : ""}
+              </option>
+            ))}
         </select>
       </label>
       <p className="span2 muted">
@@ -262,12 +308,11 @@ export default function EmployeeFields({
         <input
           id={`${id}-daily`}
           name="carga_diaria"
-          type="number"
-          min={1 / 60}
-          max="24"
-          step="any"
+          type="text"
+          inputMode="text"
+          maxLength={20}
           defaultValue={hours(employee?.carga_diaria_minutos)}
-          placeholder="Ex.: 6 ou 8,4"
+          placeholder="Ex.: 08:24 ou 8h24"
         />
       </label>
       <label htmlFor={`${id}-weekly`}>
@@ -275,20 +320,20 @@ export default function EmployeeFields({
         <input
           id={`${id}-weekly`}
           name="carga_semanal"
-          type="number"
-          min={1 / 60}
-          max="168"
-          step="any"
+          type="text"
+          inputMode="text"
+          maxLength={20}
           value={weeklyHours}
           onChange={(event) => {
             setWeeklyTouched(true);
             setWeeklyHours(event.target.value);
           }}
-          placeholder="Ex.: 30 ou 30,5"
+          placeholder="Ex.: 42:00 ou 30h30"
         />
         <small className="muted">
-          Deixe vazio se depender de revisão. 30,5 horas = 30h30. O padrão da
-          empresa só preenche novos cadastros.
+          Use horas:minutos; horas decimais também são aceitas (8,4 = 08:24).
+          Deixe vazio se depender de revisão. O padrão da empresa só preenche
+          novos cadastros.
         </small>
       </label>
       <label className="span2" htmlFor={`${id}-contract`}>

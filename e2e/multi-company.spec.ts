@@ -139,7 +139,7 @@ test("empresa mínima aceita CNPJ vazio e funcionário novo fica no vínculo con
     .getByLabel("Carga diária contratual (horas)", { exact: true })
     .fill("6");
   await dialog
-    .getByRole("spinbutton", { name: "Carga semanal contratual (horas)" })
+    .getByRole("textbox", { name: "Carga semanal contratual (horas)" })
     .fill("30");
   const selectedModel = dialog.getByRole("combobox", {
     name: "Modelo individual de jornada",

@@ -1,10 +1,15 @@
 "use client";
 
-import { useId, useState } from "react";
+import { useId, useMemo, useState } from "react";
 import { MapPin, Plus, Trash2 } from "lucide-react";
 import { dateUTC, formatMinutes } from "@/lib/engine";
 import { categoryLabels, specialDateMatchesDate } from "@/lib/special-dates";
 import { shiftEditorText, validateShiftText } from "@/lib/shift-editor";
+import type { Data } from "@/lib/store";
+import {
+  specialDateImpact,
+  type SpecialDateImpact,
+} from "@/lib/special-date-impact";
 import type {
   Company,
   Employee,
@@ -30,6 +35,59 @@ const movableName = (value: string) =>
   /carnaval|sexta.?feira santa|paixao|corpus christi|pascoa|quarta.?feira de cinzas/.test(
     value.normalize("NFD").replace(/\p{M}/gu, "").toLocaleLowerCase("pt-BR"),
   );
+const normalizeSearch = (value: string) =>
+  value.normalize("NFD").replace(/\p{M}/gu, "").toLocaleLowerCase("pt-BR");
+
+function ImpactSummary({
+  impact,
+  month,
+}: {
+  impact: SpecialDateImpact;
+  month: string;
+}) {
+  return (
+    <section
+      className="span2 rounded-lg border border-[#cbd9e7] p-4"
+      aria-label="Simulação do impacto da data especial"
+    >
+      <h3>
+        Impacto nas escalas salvas · {month.slice(5, 7)}/{month.slice(0, 4)}
+      </h3>
+      <p role="status">
+        {impact.people} pessoa(s) · {impact.days} dia(s) afetado(s) · horas de
+        relógio nos dias afetados: {formatMinutes(impact.beforeMinutes)} →{" "}
+        {formatMinutes(impact.afterMinutes)}.
+      </p>
+      <p className="muted">
+        {impact.preservedExceptions} exceção(ões) individual(is) preservada(s).
+        A simulação não grava dados nem calcula pagamentos. Funcionários sem
+        escala salva não entram nesta contagem.
+      </p>
+      {impact.errors > 0 && (
+        <p className="warning-text">
+          {impact.errors} dia(s) com dados inválidos precisam de revisão.
+        </p>
+      )}
+      {impact.changes.length > 0 && (
+        <details>
+          <summary>Ver pessoas, datas e horários afetados</summary>
+          <ul>
+            {impact.changes.slice(0, 30).map((change, index) => (
+              <li key={index}>
+                {change.employee} · {dateLabel(change.date)}:{" "}
+                {formatMinutes(change.before)} → {formatMinutes(change.after)}
+                {change.exception ? " · exceção mantida" : ""}
+              </li>
+            ))}
+          </ul>
+          {impact.changes.length > 30 && (
+            <p>Mostrando os primeiros 30 dias afetados.</p>
+          )}
+        </details>
+      )}
+    </section>
+  );
+}
 
 function visibleInPeriod(
   event: SpecialDate,
@@ -65,6 +123,7 @@ export default function SpecialDates({
   busy = false,
   onEdit,
   onDelete,
+  data,
 }: {
   company: Company;
   employees: Employee[];
@@ -74,10 +133,19 @@ export default function SpecialDates({
   busy?: boolean;
   onEdit: (event?: SpecialDate) => void;
   onDelete: (event: SpecialDate) => void;
+  data?: Data;
 }) {
   const [filter, setFilter] = useState("mes");
   const [reference, setReference] = useState(month.slice(0, 7));
   const [status, setStatus] = useState("todos");
+  const [search, setSearch] = useState("");
+  const [categoryFilter, setCategoryFilter] = useState("");
+  const [unitFilter, setUnitFilter] = useState("");
+  const [page, setPage] = useState(1);
+  const [removalImpact, setRemovalImpact] = useState<{
+    id: string;
+    impact: SpecialDateImpact;
+  } | null>(null);
   const ownEmployees = employees.filter(
     (employee) => employee.empresa_id === company.id,
   );
@@ -91,11 +159,25 @@ export default function SpecialDates({
       (event) => status === "todos" || event.ativo === (status === "ativas"),
     )
     .filter((event) => visibleInPeriod(event, reference, filter))
+    .filter(
+      (event) =>
+        (!search ||
+          normalizeSearch(`${event.nome} ${event.observacoes}`).includes(
+            normalizeSearch(search),
+          )) &&
+        (!categoryFilter || event.categoria === categoryFilter) &&
+        (!unitFilter ||
+          (unitFilter === "empresa"
+            ? !event.estabelecimento_id
+            : event.estabelecimento_id === unitFilter)),
+    )
     .sort(
       (a, b) =>
         a.data_inicio.localeCompare(b.data_inicio) ||
         a.nome.localeCompare(b.nome),
     );
+  const totalPages = Math.max(1, Math.ceil(visible.length / 12));
+  const currentPage = Math.min(page, totalPages);
   return (
     <>
       <div className="page-head">
@@ -118,10 +200,60 @@ export default function SpecialDates({
       <section className="panel mb-6" aria-label="Filtros das datas especiais">
         <div className="panel-body form-grid">
           <label>
+            Buscar data especial
+            <input
+              type="search"
+              value={search}
+              onChange={(change) => {
+                setSearch(change.target.value);
+                setPage(1);
+              }}
+              placeholder="Nome ou observação"
+            />
+          </label>
+          <label>
+            Filtrar categoria
+            <select
+              value={categoryFilter}
+              onChange={(change) => {
+                setCategoryFilter(change.target.value);
+                setPage(1);
+              }}
+            >
+              <option value="">Todas as categorias</option>
+              {Object.entries(categoryLabels).map(([key, value]) => (
+                <option key={key} value={key}>
+                  {value}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Filtrar estabelecimento
+            <select
+              value={unitFilter}
+              onChange={(change) => {
+                setUnitFilter(change.target.value);
+                setPage(1);
+              }}
+            >
+              <option value="">Todos os estabelecimentos</option>
+              <option value="empresa">Evento geral da empresa</option>
+              {ownUnits.map((unit) => (
+                <option key={unit.id} value={unit.id}>
+                  {unit.nome}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
             Período das datas especiais
             <select
               value={filter}
-              onChange={(event) => setFilter(event.target.value)}
+              onChange={(event) => {
+                setFilter(event.target.value);
+                setPage(1);
+              }}
             >
               <option value="mes">Mês selecionado</option>
               <option value="ano">Ano selecionado</option>
@@ -135,7 +267,10 @@ export default function SpecialDates({
                 <input
                   type="month"
                   value={reference}
-                  onChange={(event) => setReference(event.target.value)}
+                  onChange={(event) => {
+                    setReference(event.target.value);
+                    setPage(1);
+                  }}
                 />
               ) : (
                 <input
@@ -143,7 +278,10 @@ export default function SpecialDates({
                   min={1}
                   max={9999}
                   value={reference.slice(0, 4)}
-                  onChange={(event) => setReference(`${event.target.value}-01`)}
+                  onChange={(event) => {
+                    setReference(`${event.target.value}-01`);
+                    setPage(1);
+                  }}
                 />
               )}
             </label>
@@ -152,108 +290,158 @@ export default function SpecialDates({
             Situação das datas especiais
             <select
               value={status}
-              onChange={(event) => setStatus(event.target.value)}
+              onChange={(event) => {
+                setStatus(event.target.value);
+                setPage(1);
+              }}
             >
               <option value="todos">Todas as situações</option>
               <option value="ativas">Ativas</option>
               <option value="inativas">Inativas</option>
             </select>
           </label>
+          <div className="actions">
+            <button
+              className="button small"
+              type="button"
+              onClick={() => {
+                setSearch("");
+                setCategoryFilter("");
+                setUnitFilter("");
+                setStatus("todos");
+                setFilter("mes");
+                setReference(month.slice(0, 7));
+                setPage(1);
+              }}
+            >
+              Limpar filtros
+            </button>
+            <span role="status">{visible.length} evento(s) encontrado(s)</span>
+          </div>
         </div>
       </section>
       <section aria-label="Datas especiais cadastradas">
         {visible.length ? (
           <div className="grid2">
-            {visible.map((event) => {
-              const unit = ownUnits.find(
-                (entry) => entry.id === event.estabelecimento_id,
-              );
-              const names = ownEmployees
-                .filter((employee) =>
-                  event.funcionario_ids.includes(employee.id),
-                )
-                .map((employee) => employee.nome);
-              return (
-                <article
-                  className="panel"
-                  key={event.id}
-                  aria-label={event.nome}
-                >
-                  <div className="panel-head">
-                    <h3>{event.nome}</h3>
-                    <span className={`pill ${event.ativo ? "" : "warn"}`}>
-                      {event.ativo ? "Ativa" : "Inativa"}
-                    </span>
-                  </div>
-                  <div className="panel-body">
-                    <p>
-                      <strong>{categoryLabels[event.categoria]}</strong>
-                    </p>
-                    <p className="subtitle !mt-1">
-                      {dateLabel(event.data_inicio)}
-                      {event.data_fim && event.data_fim !== event.data_inicio
-                        ? ` a ${dateLabel(event.data_fim)}`
-                        : ""}
-                      {" · "}
-                      {recurrenceLabels[event.recorrencia]}
-                    </p>
-                    <dl className="grid gap-2 mt-4 text-sm">
-                      <div>
-                        <dt className="muted">Expediente</dt>
-                        <dd>{attendanceLabels[event.expediente]}</dd>
-                      </div>
-                      <div>
-                        <dt className="muted">Abrangência</dt>
-                        <dd>
-                          {event.alcance === "empresa"
-                            ? "Todos os funcionários da empresa"
-                            : names.join(", ") || "Funcionário indisponível"}
-                        </dd>
-                      </div>
-                      <div>
-                        <dt className="muted">Localidade</dt>
-                        <dd>
-                          {unit
-                            ? `${unit.nome} · ${unit.cidade} / ${unit.uf}`
-                            : event.cidade || event.uf
-                              ? [event.cidade, event.uf]
-                                  .filter(Boolean)
-                                  .join(" / ")
-                              : "Empresa e seus estabelecimentos"}
-                        </dd>
-                      </div>
-                    </dl>
-                    {event.expediente === "reduzido" && (
-                      <p className="subtitle">
-                        Horários: {shiftEditorText(event.intervalos)}
-                      </p>
-                    )}
-                    {event.observacoes && (
-                      <p className="subtitle whitespace-pre-wrap">
-                        {event.observacoes}
-                      </p>
-                    )}
-                    <div className="actions mt-5">
-                      <button
-                        className="button small"
-                        disabled={locked}
-                        onClick={() => onEdit(event)}
-                      >
-                        Editar data especial
-                      </button>
-                      <button
-                        className="button small danger"
-                        disabled={locked}
-                        onClick={() => onDelete(event)}
-                      >
-                        <Trash2 size={13} aria-hidden="true" /> Excluir data
-                        especial
-                      </button>
+            {visible
+              .slice((currentPage - 1) * 12, currentPage * 12)
+              .map((event) => {
+                const unit = ownUnits.find(
+                  (entry) => entry.id === event.estabelecimento_id,
+                );
+                const names = ownEmployees
+                  .filter((employee) =>
+                    event.funcionario_ids.includes(employee.id),
+                  )
+                  .map((employee) => employee.nome);
+                return (
+                  <article
+                    className="panel"
+                    key={event.id}
+                    aria-label={event.nome}
+                  >
+                    <div className="panel-head">
+                      <h3>{event.nome}</h3>
+                      <span className={`pill ${event.ativo ? "" : "warn"}`}>
+                        {event.ativo ? "Ativa" : "Inativa"}
+                      </span>
                     </div>
-                  </div>
-                </article>
-              );
-            })}
+                    <div className="panel-body">
+                      <p>
+                        <strong>{categoryLabels[event.categoria]}</strong>
+                      </p>
+                      <p className="subtitle !mt-1">
+                        {dateLabel(event.data_inicio)}
+                        {event.data_fim && event.data_fim !== event.data_inicio
+                          ? ` a ${dateLabel(event.data_fim)}`
+                          : ""}
+                        {" · "}
+                        {recurrenceLabels[event.recorrencia]}
+                      </p>
+                      <dl className="grid gap-2 mt-4 text-sm">
+                        <div>
+                          <dt className="muted">Expediente</dt>
+                          <dd>{attendanceLabels[event.expediente]}</dd>
+                        </div>
+                        <div>
+                          <dt className="muted">Abrangência</dt>
+                          <dd>
+                            {event.alcance === "empresa"
+                              ? "Todos os funcionários da empresa"
+                              : names.join(", ") || "Funcionário indisponível"}
+                          </dd>
+                        </div>
+                        <div>
+                          <dt className="muted">Localidade</dt>
+                          <dd>
+                            {unit
+                              ? `${unit.nome} · ${unit.cidade} / ${unit.uf}`
+                              : event.cidade || event.uf
+                                ? [event.cidade, event.uf]
+                                    .filter(Boolean)
+                                    .join(" / ")
+                                : "Empresa e seus estabelecimentos"}
+                          </dd>
+                        </div>
+                      </dl>
+                      {event.expediente === "reduzido" && (
+                        <p className="subtitle">
+                          Horários: {shiftEditorText(event.intervalos)}
+                        </p>
+                      )}
+                      {event.observacoes && (
+                        <p className="subtitle whitespace-pre-wrap">
+                          {event.observacoes}
+                        </p>
+                      )}
+                      <div className="actions mt-5">
+                        {data && (
+                          <button
+                            className="button small"
+                            type="button"
+                            disabled={locked}
+                            onClick={() =>
+                              setRemovalImpact({
+                                id: event.id,
+                                impact: specialDateImpact(
+                                  data,
+                                  company.id,
+                                  null,
+                                  event.id,
+                                  month,
+                                ),
+                              })
+                            }
+                          >
+                            Simular exclusão
+                          </button>
+                        )}
+                        <button
+                          className="button small"
+                          disabled={locked}
+                          onClick={() => onEdit(event)}
+                        >
+                          Editar data especial
+                        </button>
+                        <button
+                          className="button small danger"
+                          disabled={locked}
+                          onClick={() => onDelete(event)}
+                        >
+                          <Trash2 size={13} aria-hidden="true" /> Excluir data
+                          especial
+                        </button>
+                      </div>
+                      {removalImpact?.id === event.id && (
+                        <ImpactSummary
+                          impact={removalImpact.impact}
+                          month={month}
+                        />
+                      )}
+                    </div>
+                  </article>
+                );
+              })}
           </div>
         ) : (
           <div className="panel empty">
@@ -261,6 +449,30 @@ export default function SpecialDates({
           </div>
         )}
       </section>
+      {totalPages > 1 && (
+        <nav
+          className="actions justify-between mt-4"
+          aria-label="Paginação das datas especiais"
+        >
+          <button
+            className="button small"
+            disabled={currentPage === 1}
+            onClick={() => setPage(currentPage - 1)}
+          >
+            Página anterior
+          </button>
+          <span role="status">
+            Página {currentPage} de {totalPages}
+          </span>
+          <button
+            className="button small"
+            disabled={currentPage === totalPages}
+            onClick={() => setPage(currentPage + 1)}
+          >
+            Próxima página
+          </button>
+        </nav>
+      )}
       <div className="banner neutral mt-6">
         <MapPin size={18} aria-hidden="true" />
         <p>
@@ -280,12 +492,14 @@ export function SpecialDateFields({
   establishments,
   event,
   month,
+  data,
 }: {
   company: Company;
   employees: Employee[];
   establishments: Establishment[];
   event?: SpecialDate;
   month: string;
+  data?: Data;
 }) {
   const id = useId();
   const [name, setName] = useState(event?.nome ?? "");
@@ -313,6 +527,9 @@ export function SpecialDateFields({
   const [mobile, setMobile] = useState(event?.data_movel ?? false);
   const [uf, setUf] = useState(event?.uf ?? company.uf);
   const [city, setCity] = useState(event?.cidade ?? company.cidade);
+  const [active, setActive] = useState(event?.ativo ?? true);
+  const [audienceSearch, setAudienceSearch] = useState("");
+  const [department, setDepartment] = useState("");
   const annualBlocked = mobile || movableName(name);
   const ownUnits = establishments.filter(
     (unit) => unit.empresa_id === company.id,
@@ -322,7 +539,79 @@ export function SpecialDateFields({
       employee.empresa_id === company.id &&
       (!unitId || employee.estabelecimento_id === unitId),
   );
-  const shifts = validateShiftText(raw);
+  const shifts = useMemo(() => validateShiftText(raw), [raw]);
+  const filteredCandidates = candidates.filter(
+    (employee) =>
+      (!audienceSearch ||
+        normalizeSearch(
+          `${employee.nome} ${employee.matricula ?? ""} ${employee.setor ?? ""}`,
+        ).includes(normalizeSearch(audienceSearch))) &&
+      (!department || employee.setor === department),
+  );
+  const impact = useMemo(() => {
+    let result: SpecialDateImpact | null = null;
+    if (
+      data &&
+      start &&
+      name.trim() &&
+      !Number.isNaN(+dateUTC(start)) &&
+      !shifts.errors.intervals
+    ) {
+      try {
+        result = specialDateImpact(
+          data,
+          company.id,
+          {
+            id: event?.id ?? "simulation-event",
+            empresa_id: company.id,
+            estabelecimento_id: unitId || null,
+            nome: name,
+            data_inicio: start,
+            data_fim: recurrence === "unica" ? null : end || null,
+            categoria: category,
+            alcance: audience,
+            funcionario_ids: audience === "empresa" ? [] : selected,
+            recorrencia: recurrence,
+            expediente: attendance,
+            intervalos: attendance === "reduzido" ? (shifts.shifts ?? []) : [],
+            observacoes: event?.observacoes ?? "",
+            ativo: active,
+            data_movel: mobile,
+            uf:
+              category === "feriado_estadual" ||
+              category === "feriado_municipal"
+                ? uf
+                : null,
+            cidade: category === "feriado_municipal" ? city : null,
+          },
+          event?.id ?? "simulation-event",
+          month,
+        );
+      } catch {
+        /* Incomplete form: native/domain validation will describe the field. */
+      }
+    }
+    return result;
+  }, [
+    data,
+    company.id,
+    event,
+    month,
+    name,
+    start,
+    end,
+    category,
+    unitId,
+    audience,
+    selected,
+    recurrence,
+    attendance,
+    shifts,
+    active,
+    mobile,
+    uf,
+    city,
+  ]);
   const shiftError =
     attendance === "reduzido"
       ? (shifts.errors.intervals ??
@@ -526,8 +815,73 @@ export function SpecialDateFields({
           aria-describedby={`${id}-audience-help`}
         >
           <legend className="font-semibold">Funcionários abrangidos</legend>
+          <div className="form-grid mt-2">
+            <label>
+              Pesquisar funcionários abrangidos
+              <input
+                type="search"
+                value={audienceSearch}
+                onChange={(change) => setAudienceSearch(change.target.value)}
+                placeholder="Nome, matrícula ou setor"
+              />
+            </label>
+            <label>
+              Filtrar setor dos abrangidos
+              <select
+                value={department}
+                onChange={(change) => setDepartment(change.target.value)}
+              >
+                <option value="">Todos os setores</option>
+                {[
+                  ...new Set(
+                    candidates
+                      .map((employee) => employee.setor)
+                      .filter(Boolean),
+                  ),
+                ]
+                  .sort()
+                  .map((sector) => (
+                    <option key={sector} value={sector}>
+                      {sector}
+                    </option>
+                  ))}
+              </select>
+            </label>
+          </div>
+          <div className="actions mt-3">
+            <button
+              className="button small"
+              type="button"
+              onClick={() =>
+                setSelected((current) => [
+                  ...new Set([
+                    ...current,
+                    ...filteredCandidates.map((employee) => employee.id),
+                  ]),
+                ])
+              }
+            >
+              Selecionar resultados ({filteredCandidates.length})
+            </button>
+            <button
+              className="button small"
+              type="button"
+              onClick={() =>
+                setSelected((current) =>
+                  current.filter(
+                    (key) =>
+                      !filteredCandidates.some(
+                        (employee) => employee.id === key,
+                      ),
+                  ),
+                )
+              }
+            >
+              Desmarcar resultados
+            </button>
+          </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-2">
-            {candidates.map((employee) => (
+            {filteredCandidates.map((employee) => (
               <label className="check-label" key={employee.id}>
                 <input
                   type="checkbox"
@@ -647,10 +1001,12 @@ export function SpecialDateFields({
         <input
           name="ativo"
           type="checkbox"
-          defaultChecked={event?.ativo ?? true}
+          checked={active}
+          onChange={(change) => setActive(change.target.checked)}
         />{" "}
         Data especial ativa
       </label>
+      {impact && <ImpactSummary impact={impact} month={month} />}
       <p className="span2 muted">
         Recesso e dispensa de expediente não aplicam férias, falta, desconto,
         banco de horas ou pagamento adicional automaticamente.

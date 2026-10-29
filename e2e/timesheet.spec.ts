@@ -30,7 +30,7 @@ test("folha de ponto baixa PDF da prévia atual sem salvar ou substituir a expor
     .click();
   const download = await pending;
   expect(download.suggestedFilename()).toBe(
-    "folha-de-ponto-2026-12-mariana-costa.pdf",
+    "folha-de-ponto-aurora-contabilidade-mariana-costa-2026-12.pdf",
   );
   const path = testInfo.outputPath("folha-de-ponto-previa.pdf");
   await download.saveAs(path);
@@ -62,7 +62,7 @@ test("folha segue empresa e funcionário selecionados, sem misturar jornadas", a
     .click();
   const download = await pending;
   expect(download.suggestedFilename()).toBe(
-    "folha-de-ponto-2026-12-rafael-lima.pdf",
+    "folha-de-ponto-horizonte-servicos-rafael-lima-2026-12.pdf",
   );
   const path = testInfo.outputPath("folha-de-ponto-beta.pdf");
   await download.saveAs(path);

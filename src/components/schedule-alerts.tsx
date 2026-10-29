@@ -1,5 +1,5 @@
 "use client";
-import { useId } from "react";
+import { useId, useState } from "react";
 import { AlertTriangle, BookOpen, Check, ChevronRight } from "lucide-react";
 import type { AlertGroup, AlertOccurrence, AlertSummary } from "@/lib/alerts";
 
@@ -56,18 +56,24 @@ function Group({
         {group.companyName}
         {group.employeeName ? ` · ${group.employeeName}` : ""}
       </p>
-      <p>{group.message}</p>
-      <p className="alert-suggestion">{group.suggestedAction}</p>
-      <p className="alert-period">
-        <strong>Data / período:</strong> {periodLabel(group.occurrences[0])}
-        {group.count > 1 ? " e demais ocorrências abaixo" : ""}
-      </p>
-      <details className="alert-rule-details">
-        <summary>Regra e fonte</summary>
-        <p>
-          <strong>{group.rule}</strong>
+      <details
+        className="alert-group-details"
+        open={group.category === "violation" ? true : undefined}
+      >
+        <summary>Detalhes e orientação</summary>
+        <p>{group.message}</p>
+        <p className="alert-suggestion">{group.suggestedAction}</p>
+        <p className="alert-period">
+          <strong>Data / período:</strong> {periodLabel(group.occurrences[0])}
+          {group.count > 1 ? " e demais ocorrências abaixo" : ""}
         </p>
-        <p className="alert-source">{group.source}</p>
+        <details className="alert-rule-details">
+          <summary>Regra e fonte</summary>
+          <p>
+            <strong>{group.rule}</strong>
+          </p>
+          <p className="alert-source">{group.source}</p>
+        </details>
       </details>
       {(group.action !== "employee" || onEmployeeReview) && (
         <button
@@ -110,8 +116,36 @@ function Group({
 export default function ScheduleAlerts(props: Props) {
   const { summary } = props;
   const headingId = useId();
+  const [nextProblem, setNextProblem] = useState(0);
+  const problems = [
+    ...new Set(
+      [...summary.violations, ...summary.attention].flatMap((group) =>
+        group.occurrences.map((occurrence) => occurrence.date),
+      ),
+    ),
+  ].sort();
   return (
     <section className="schedule-alerts" aria-label="Conferência da escala">
+      {problems.length > 0 && (
+        <div className="alert-overview" aria-label="Resumo das ocorrências">
+          <span>
+            <strong>{summary.counts.violations}</strong> impedimento(s) ·{" "}
+            <strong>{summary.counts.attention}</strong> aviso(s) ·{" "}
+            <strong>{summary.counts.pendingSources}</strong> pendência(s) de
+            fonte
+          </span>
+          <button
+            type="button"
+            className="button small"
+            onClick={() => {
+              props.onSelect(problems[nextProblem % problems.length]);
+              setNextProblem((current) => current + 1);
+            }}
+          >
+            Próximo problema <ChevronRight size={14} aria-hidden="true" />
+          </button>
+        </div>
+      )}
       {summary.violations.length ? (
         <section
           className="alert-section violation"

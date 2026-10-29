@@ -4,6 +4,7 @@ import { Copy } from "lucide-react";
 import { formatMinutes, span } from "@/lib/engine";
 import { shiftEditorText, validateShiftText } from "@/lib/shift-editor";
 import type { Company, Model } from "@/lib/types";
+import ShiftVisualEditor from "./shift-visual-editor";
 
 const days = [
   "Domingo",
@@ -158,6 +159,11 @@ export default function ModelFields({
               trabalhadas: {formatMinutes(cycleValidation.worked)}
             </p>
           )}
+          <ShiftVisualEditor
+            value={cycleShift}
+            label="plantão"
+            onApply={setCycleShift}
+          />
         </div>
       ) : (
         <>
@@ -223,6 +229,17 @@ export default function ModelFields({
                         {error}
                       </p>
                     )}
+                    <ShiftVisualEditor
+                      value={week[day]}
+                      label={name}
+                      onApply={(value) =>
+                        setWeek((current) =>
+                          current.map((item, index) =>
+                            index === day ? value : item,
+                          ),
+                        )
+                      }
+                    />
                   </div>
                 </div>
               );

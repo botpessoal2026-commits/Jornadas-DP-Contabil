@@ -424,7 +424,7 @@ test("abrangência selecionada oferece somente funcionários da empresa e não a
     })
     .selectOption({ label: ownModel });
   await form
-    .getByRole("spinbutton", { name: /^Carga semanal contratual/ })
+    .getByRole("textbox", { name: /^Carga semanal contratual/ })
     .fill("42");
   await saveForm(page);
   await tab(page, "Feriados");
@@ -693,6 +693,7 @@ async function mockAuthenticatedPersistence(page: Page) {
     log_alteracoes: [],
     datas_especiais: data.specialDates,
     estabelecimentos: data.establishments,
+    registros_operacionais: [],
   };
   const mutations: { rpc: string; body: Record<string, unknown> }[] = [];
   const unexpected: string[] = [];

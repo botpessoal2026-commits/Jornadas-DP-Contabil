@@ -1,6 +1,7 @@
 "use client";
 import {
   useEffect,
+  useId,
   useMemo,
   useRef,
   useState,
@@ -49,6 +50,11 @@ import {
   deleteCompanyModel,
   deleteCompanySpecialDate,
   saveSchedules,
+  importCompanyEmployees,
+  transitionScheduleStatus,
+  saveCompanyOperation,
+  applyCompanySwap,
+  deleteCompanyOperation,
   type Data,
 } from "@/lib/store";
 import {
@@ -111,6 +117,38 @@ import {
 } from "@/lib/exports";
 import Brand from "./brand";
 import TeamSchedule from "./team-schedule";
+import BulkSchedules from "./bulk-schedules";
+import EmployeeImport from "./employee-import";
+import ReportCenter from "./report-center";
+import WorkQueue from "./work-queue";
+import {
+  resolvePublishedContext,
+  usesPublishedContext,
+  type PublishedReportContext,
+} from "@/lib/published-context";
+import CompanyOperations from "./company-operations";
+import ScheduleGovernance from "./schedule-governance";
+import ThemeSwitch from "./theme-switch";
+import { legalValuePresentation } from "@/lib/legal-presentation";
+import {
+  calendarWeek,
+  recentSchedules,
+  shiftMonth,
+} from "@/lib/workspace-improvements";
+import {
+  readDraft,
+  writeDraft,
+  deleteDraft,
+  clearOwnerDrafts,
+  draftKey,
+  type DraftRecord,
+} from "@/lib/draft-vault";
+import {
+  isScheduleLocked,
+  applyDemoTransition,
+  reviewAttestation,
+} from "@/lib/schedule-governance";
+import { assessSwap, type CompanyOperation } from "@/lib/company-operations";
 import SpecialDates, {
   SpecialDateFields,
   EstablishmentFields,
@@ -139,6 +177,8 @@ type Page =
   | "feriados"
   | "regras"
   | "historico"
+  | "operacoes"
+  | "relatorios"
   | "company-overview"
   | "company-settings"
   | "employee-detail";
@@ -163,6 +203,8 @@ const nav = [
   ["feriados", "Feriados", Flag],
   ["regras", "Parâmetros legais", SlidersHorizontal],
   ["historico", "Histórico", History],
+  ["operacoes", "Operações", Clock3],
+  ["relatorios", "Relatórios", FileText],
 ] as const;
 const dateLabel = (s: string) =>
   dateUTC(s).toLocaleDateString("pt-BR", { timeZone: "UTC" });
@@ -246,6 +288,7 @@ function Dialog({
   children: ReactNode;
   close: () => void;
 }) {
+  const titleId = useId();
   const el = useRef<HTMLDivElement>(null);
   const closeRef = useRef(close);
   closeRef.current = close;
@@ -259,6 +302,11 @@ function Dialog({
       ).filter((element) => element.getClientRects().length > 0);
     focusable()[0]?.focus();
     const handle = (e: KeyboardEvent) => {
+      if (
+        Array.from(document.querySelectorAll('[role="dialog"]')).at(-1) !==
+        el.current
+      )
+        return;
       if (e.key === "Escape") closeRef.current();
       if (e.key === "Tab") {
         const elements = focusable();
@@ -295,11 +343,11 @@ function Dialog({
         className="dialog"
         role="dialog"
         aria-modal="true"
-        aria-labelledby="dialog-title"
+        aria-labelledby={titleId}
         ref={el}
       >
         <div className="dialog-head">
-          <h2 id="dialog-title">{title}</h2>
+          <h2 id={titleId}>{title}</h2>
           <button className="icon-button" aria-label="Fechar" onClick={close}>
             <X size={20} />
           </button>
@@ -347,6 +395,68 @@ export default function Workspace() {
     [restHoliday, setRestHoliday] = useState(true),
     [dirty, setDirty] = useState(false);
   const [editedDay, setEditedDay] = useState<Day | null>(null);
+  const modalChanged = useRef(false);
+  const modalForm = useRef<HTMLFormElement>(null);
+  const modalBaseline = useRef<string | null>(null);
+  const formFingerprint = () =>
+    JSON.stringify(
+      Array.from(
+        modalForm.current?.querySelectorAll<
+          HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement
+        >("input,select,textarea") ?? [],
+      )
+        .filter((e) => !["button", "submit"].includes(e.type))
+        .map((e) => [
+          e.getAttribute("name") ?? e.getAttribute("aria-label") ?? e.id,
+          e instanceof HTMLInputElement &&
+          ["checkbox", "radio"].includes(e.type)
+            ? e.checked
+            : e.value,
+        ]),
+    );
+  const recordModalChange = () => {
+    modalChanged.current =
+      modalBaseline.current === null ||
+      formFingerprint() !== modalBaseline.current;
+    requestAnimationFrame(() => {
+      if (modalForm.current)
+        modalChanged.current =
+          modalBaseline.current === null ||
+          formFingerprint() !== modalBaseline.current;
+    });
+  };
+  useEffect(() => {
+    modalChanged.current = false;
+    modalBaseline.current = null;
+    if (!modal) return;
+    const frame = requestAnimationFrame(() => {
+      modalBaseline.current = formFingerprint();
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [modal]);
+  const [readbackPending, setReadbackPending] = useState(false);
+  const [publishedView, setPublishedView] = useState<{
+    key: string;
+    context: PublishedReportContext | null;
+    error: string | null;
+  }>({ key: "", context: null, error: null });
+  const [calendarView, setCalendarView] = useState<
+    "month" | "week" | "compact"
+  >("month");
+  const [weekDate, setWeekDate] = useState("");
+  const [pendingDay, setPendingDay] = useState<{
+    employeeId: string;
+    date: string;
+  } | null>(null);
+  const [recovery, setRecovery] = useState<DraftRecord | null>(null);
+  const [recoverDrafts, setRecoverDrafts] = useState(false);
+  const [draftHistory, setDraftHistory] = useState<{
+    past: Schedule[];
+    future: Schedule[];
+  }>({ past: [], future: [] });
+  const [bulkDirty, setBulkDirty] = useState(false);
+  const [operationDirty, setOperationDirty] = useState(false);
+  const [bulkEpoch, setBulkEpoch] = useState(0);
   const [scheduleView, setScheduleView] = useState<"individual" | "team">(
     "individual",
   );
@@ -406,6 +516,19 @@ export default function Workspace() {
     accept: () => void;
   } | null>(null);
   const applyLocation = (location: WorkspaceLocation) => {
+    if (dirty && draft && recoverDrafts)
+      void deleteDraft(
+        draftKey(
+          demo ? "demo" : (user?.id ?? ""),
+          draft.empresa_id,
+          draft.funcionario_id,
+          draft.mes,
+        ),
+      ).catch(() => {});
+    modalChanged.current = false;
+    setBulkEpoch((value) => value + 1);
+    setBulkDirty(false);
+    setOperationDirty(false);
     setCompanyScopeId(location.companyId);
     setCompanyId(location.companyId ?? "");
     setEmployeeId(location.employeeId ?? "");
@@ -425,6 +548,7 @@ export default function Workspace() {
   };
   useEffect(() => {
     const location = parseWorkspaceLocation(window.location.search);
+    setRecoverDrafts(localStorage.getItem("cont-contabil-recovery") === "1");
     if (location.demo) {
       setData(demoData());
       setDemo(true);
@@ -443,14 +567,14 @@ export default function Workspace() {
   }
   useEffect(() => {
     const leave = (e: BeforeUnloadEvent) => {
-      if (dirty) {
+      if (dirty || bulkDirty || operationDirty || modalChanged.current) {
         e.preventDefault();
         e.returnValue = "";
       }
     };
     window.addEventListener("beforeunload", leave);
     return () => window.removeEventListener("beforeunload", leave);
-  }, [dirty]);
+  }, [dirty, bulkDirty, operationDirty]);
   useEffect(() => {
     if (!toast) return;
     const t = setTimeout(() => setToast(null), 9000);
@@ -477,6 +601,7 @@ export default function Workspace() {
         authUserId.current !== null &&
         authUserId.current !== (session?.user.id ?? null)
       ) {
+        void clearOwnerDrafts(authUserId.current).catch(() => {});
         setData(emptyData);
         setScheduleView("individual");
         setDraft(null);
@@ -511,7 +636,10 @@ export default function Workspace() {
     setDataLoadError(null);
     loadData(companyScopeId)
       .then((d) => {
-        if (alive) setData(d);
+        if (alive) {
+          setData(d);
+          setReadbackPending(false);
+        }
       })
       .catch((e) => {
         if (alive) setDataLoadError(e.message);
@@ -560,7 +688,7 @@ export default function Workspace() {
         return;
       }
       const next = parseWorkspaceLocation(window.location.search);
-      if (dirty) {
+      if (dirty || bulkDirty || operationDirty || modalChanged.current) {
         window.history.pushState(null, "", currentHref.current);
         setConfirmation({
           title: "Descartar alterações não salvas?",
@@ -572,7 +700,7 @@ export default function Workspace() {
     };
     window.addEventListener("popstate", pop);
     return () => window.removeEventListener("popstate", pop);
-  }, [dirty]);
+  }, [dirty, bulkDirty, operationDirty]);
   useEffect(() => {
     if (!companyId && data.companies.length) setCompanyId(data.companies[0].id);
   }, [data, companyId, modelId]);
@@ -590,12 +718,50 @@ export default function Workspace() {
       s.funcionario_id === employee?.id &&
       s.mes.startsWith(month),
   );
+  const publishedKey =
+    saved && usesPublishedContext(saved)
+      ? `${activeDataContext.current}:${saved.id}:${saved.revisao ?? 0}:${saved.status}`
+      : "";
+  const frozen =
+    publishedKey && publishedView.key === publishedKey
+      ? publishedView.context
+      : null;
+  const reportData = frozen?.data ?? data;
+  const reportCompany = frozen?.company ?? company;
+  const reportEmployee = frozen?.employee ?? employee;
+  useEffect(() => {
+    if (!publishedKey || !saved) {
+      setPublishedView({ key: "", context: null, error: null });
+      return;
+    }
+    let alive = true;
+    setPublishedView({ key: publishedKey, context: null, error: null });
+    resolvePublishedContext(rawData, saved)
+      .then((context) => {
+        if (alive)
+          setPublishedView({ key: publishedKey, context, error: null });
+      })
+      .catch((error) => {
+        if (alive)
+          setPublishedView({
+            key: publishedKey,
+            context: null,
+            error:
+              error instanceof Error
+                ? error.message
+                : "Não foi possível carregar a versão publicada.",
+          });
+      });
+    return () => {
+      alive = false;
+    };
+  }, [publishedKey, rawData.scheduleVersions, loadAttempt]);
   const models = modelsForCompany(data.models, companyId, [
     employee?.modelo_padrao_id,
     company?.modelo_padrao_id,
     saved?.modelo_id,
   ]);
-  const scheduleRules = rulesForCompany(data.rules, companyId);
+  const scheduleRules = rulesForCompany(reportData.rules, companyId);
   const modelResolution =
     employee && company
       ? resolveEmployeeModelWithOrigin(
@@ -621,11 +787,24 @@ export default function Workspace() {
     scopedData.logs = companyAudit.logs;
   const companyReadOnly =
     !!company && (company.situacao ?? "ativa") !== "ativa";
-  const scheduleReadOnly = companyReadOnly || employee?.situacao === "inativo";
+  const scheduleReadOnly =
+    companyReadOnly ||
+    employee?.situacao === "inativo" ||
+    readbackPending ||
+    Boolean(saved && isScheduleLocked(saved));
   const detailEmployee = scopedData.employees.find(
     (e) => e.id === detailEmployeeId,
   );
   const scheduleProjection = useMemo(() => {
+    if (publishedKey) {
+      return {
+        value: frozen?.schedule ?? saved,
+        error: frozen
+          ? null
+          : (publishedView.error ??
+            "Carregando a versão publicada preservada..."),
+      };
+    }
     const candidate = draft ?? saved;
     const person = data.employees.find(
       (entry) => entry.id === candidate?.funcionario_id,
@@ -664,8 +843,83 @@ export default function Workspace() {
     data.establishments,
     data.holidays,
     rawData.schedules,
+    publishedKey,
+    frozen,
+    publishedView.error,
   ]);
   const schedule = scheduleProjection.value;
+  const localOwner = demo ? "demo" : (user?.id ?? "");
+  useEffect(() => {
+    setDraftHistory({ past: [], future: [] });
+    setWeekDate((current) =>
+      current.slice(0, 7) === month ? current : `${month}-01`,
+    );
+    setRecovery(null);
+    if (!recoverDrafts || !localOwner || !company || !employee) return;
+    let alive = true;
+    readDraft(localOwner, company.id, employee.id, month)
+      .then((record) => {
+        if (alive) setRecovery(record);
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [company?.id, employee?.id, month, localOwner, recoverDrafts]);
+  useEffect(() => {
+    if (!recoverDrafts || !dirty || !draft || !localOwner) return;
+    const timer = setTimeout(() => {
+      writeDraft(localOwner, draft).catch(() =>
+        notify(
+          "Não foi possível guardar a recuperação local. Salve a escala para preservar as alterações.",
+          true,
+        ),
+      );
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [draft, dirty, recoverDrafts, localOwner]);
+  useEffect(() => {
+    if (
+      pendingDay &&
+      schedule?.funcionario_id === pendingDay.employeeId &&
+      schedule.mes.slice(0, 7) === pendingDay.date.slice(0, 7)
+    ) {
+      const day = schedule.dias.find((d) => d.data === pendingDay.date);
+      if (day && !scheduleReadOnly) {
+        modalChanged.current = false;
+        setEditedDay(day);
+        setActiveDate(day.data);
+        setModal({
+          kind: "dia",
+          row: day as unknown as Record<string, unknown>,
+        });
+      }
+      setPendingDay(null);
+    }
+  }, [pendingDay, schedule, scheduleReadOnly]);
+  function changeDraft(next: Schedule) {
+    if (schedule)
+      setDraftHistory((h) => ({
+        past: [...h.past, schedule].slice(-30),
+        future: [],
+      }));
+    setDraft(next);
+    setDirty(true);
+    setSaveState("idle");
+  }
+  function undoDraft(forward = false) {
+    const list = forward ? draftHistory.future : draftHistory.past;
+    const next = list.at(-1);
+    if (!next || !schedule) return;
+    setDraftHistory((h) =>
+      forward
+        ? { past: [...h.past, schedule], future: h.future.slice(0, -1) }
+        : { past: h.past.slice(0, -1), future: [...h.future, schedule] },
+    );
+    setDraft(next);
+    setDirty(true);
+    setSaveState("idle");
+  }
   const inheritedDay = useMemo(() => {
     if (
       modal?.kind !== "dia" ||
@@ -717,16 +971,16 @@ export default function Workspace() {
   const calculation = useMemo(() => {
     if (scheduleProjection.error)
       return { value: null, error: scheduleProjection.error };
-    if (!schedule || !company) return { value: null, error: null };
+    if (!schedule || !reportCompany) return { value: null, error: null };
     try {
       return {
         value: evaluate(
           schedule.dias,
-          data.rules,
-          company,
+          reportData.rules,
+          reportCompany,
           schedule.mes,
-          scheduleRegime(schedule, data.models),
-          data.employees.find((e) => e.id === schedule.funcionario_id),
+          scheduleRegime(schedule, reportData.models),
+          reportEmployee,
         ),
         error: null,
       };
@@ -747,6 +1001,9 @@ export default function Workspace() {
     data.models,
     data.schedules,
     scheduleProjection.error,
+    reportData,
+    reportCompany,
+    reportEmployee,
   ]);
   const report = calculation.value;
   const calendarTotals = schedule
@@ -845,15 +1102,36 @@ export default function Workspace() {
       return;
     }
     const apply = () => {
+      if (dirty && draft && localOwner && recoverDrafts)
+        void deleteDraft(
+          draftKey(
+            localOwner,
+            draft.empresa_id,
+            draft.funcionario_id,
+            draft.mes,
+          ),
+        ).catch(() => {});
       callback();
       setModal(null);
       setConfirmation(null);
+      setModal(null);
+      modalChanged.current = false;
+      setBulkDirty(false);
+      setOperationDirty(false);
+      setBulkEpoch((value) => value + 1);
+      setRecovery(null);
+      setReadbackPending(false);
+      setDraftHistory({ past: [], future: [] });
       setDraft(null);
       setDirty(false);
       setSaveState("idle");
       setActiveDate(null);
+      setBulkDirty(false);
+      setOperationDirty(false);
+      setBulkEpoch((value) => value + 1);
+      modalChanged.current = false;
     };
-    if (dirty)
+    if (dirty || bulkDirty || operationDirty || modalChanged.current)
       setConfirmation({
         title: "Descartar alterações não salvas?",
         message:
@@ -880,12 +1158,38 @@ export default function Workspace() {
       setBusy(false);
     }
   }
+  async function scopedAction<T>(action: () => Promise<T>): Promise<T> {
+    if (operationPending.current) throw new Error("Aguarde a operação atual.");
+    operationPending.current = true;
+    setBusy(true);
+    try {
+      return await action();
+    } finally {
+      operationPending.current = false;
+      setBusy(false);
+    }
+  }
   async function refresh(expected = activeDataContext.current) {
     assertDataContext(expected);
     if (!demo) {
       const next = await loadData(companyScopeId);
       assertDataContext(expected);
       setData(next);
+    }
+  }
+  async function refreshAfterCommit(expected: string, label: string) {
+    try {
+      await refresh(expected);
+      setReadbackPending(false);
+      return true;
+    } catch (error) {
+      assertDataContext(expected);
+      setReadbackPending(true);
+      notify(
+        `${label} concluída. Não foi possível atualizar a tela; atualize os dados antes de continuar.`,
+        true,
+      );
+      return false;
     }
   }
   async function rowSave(
@@ -1149,6 +1453,12 @@ export default function Workspace() {
     return { ...copy, id };
   }
   function withNeighbors(s: Schedule): Schedule {
+    if (usesPublishedContext(s)) {
+      if (frozen && frozen.schedule.id === s.id) return frozen.schedule;
+      throw new Error(
+        "Abra a versão publicada preservada antes de emitir este documento.",
+      );
+    }
     const target = data.companies.find((entry) => entry.id === s.empresa_id);
     const person = data.employees.find(
       (entry) =>
@@ -1196,8 +1506,15 @@ export default function Workspace() {
               entry.funcionario_id === e.id &&
               entry.mes.startsWith(targetMonth),
           );
+    if (previous && isScheduleLocked(previous))
+      throw new Error(
+        "Reabra a escala aprovada/publicada/fechada antes de gerar outra prévia nesta competência.",
+      );
     return withNeighbors({
-      id: "",
+      id: previous?.id ?? "",
+      revisao: previous?.revisao,
+      status: previous?.status,
+      updated_at: previous?.updated_at,
       empresa_id: company.id,
       funcionario_id: e.id,
       modelo_id: m.id,
@@ -1235,6 +1552,18 @@ export default function Workspace() {
         );
       if (companyScopeId && item.empresa_id !== companyScopeId)
         throw new Error("A escala deve pertencer à empresa ativa.");
+      const previous = rawData.schedules.find(
+        (old) =>
+          old.empresa_id === item.empresa_id &&
+          old.funcionario_id === item.funcionario_id &&
+          old.mes === item.mes,
+      );
+      if (previous && isScheduleLocked(previous))
+        throw new Error("Reabra a escala antes de substituir seus dias.");
+      if (demo && previous && (item.revisao ?? 0) !== (previous.revisao ?? 0))
+        throw new Error(
+          "A escala foi alterada. Atualize os dados antes de salvar.",
+        );
     }
     if (demo) {
       setData((current) => {
@@ -1244,7 +1573,13 @@ export default function Workspace() {
               old.funcionario_id === item.funcionario_id &&
               old.mes === item.mes,
           );
-          return { ...item, id: item.id || before?.id || crypto.randomUUID() };
+          return {
+            ...item,
+            id: item.id || before?.id || crypto.randomUUID(),
+            revisao: (before?.revisao ?? 0) + 1,
+            status: before?.status ?? "rascunho",
+            updated_at: new Date().toISOString(),
+          };
         });
         const events = changed.map((item) => {
           const before = current.schedules.find((old) => old.id === item.id);
@@ -1274,18 +1609,59 @@ export default function Workspace() {
       });
     } else {
       await saveSchedules(items, companyScopeId ?? items[0]?.empresa_id);
-      await refresh(expected);
+      try {
+        await refresh(expected);
+        setReadbackPending(false);
+      } catch (error) {
+        assertDataContext(expected);
+        setReadbackPending(true);
+        setData((current) => ({
+          ...current,
+          schedules: [
+            ...current.schedules.filter(
+              (old) =>
+                !items.some(
+                  (item) =>
+                    item.empresa_id === old.empresa_id &&
+                    item.funcionario_id === old.funcionario_id &&
+                    item.mes === old.mes,
+                ),
+            ),
+            ...items,
+          ],
+        }));
+        notify(
+          "Gravação concluída. Não foi possível atualizar a tela; atualize os dados antes de editar novamente.",
+          true,
+        );
+        return false;
+      }
     }
     assertDataContext(expected);
+    return true;
   }
   async function saveCurrent() {
     if (!schedule) return;
     const expected = activeDataContext.current;
     setSaveState("saving");
     try {
-      await persistSchedules([schedule]);
+      const reloaded = await persistSchedules([schedule]);
       assertDataContext(expected);
       setSaveState("saved");
+      setDraft(null);
+      setDirty(false);
+      setDraftHistory({ past: [], future: [] });
+      setRecovery(null);
+      if (localOwner)
+        void deleteDraft(
+          draftKey(
+            localOwner,
+            schedule.empresa_id,
+            schedule.funcionario_id,
+            schedule.mes,
+          ),
+        ).catch(() => {});
+      if (!reloaded) return;
     } catch (error) {
       setSaveState("error");
       throw error;
@@ -1297,6 +1673,39 @@ export default function Workspace() {
         ? "Escala atualizada nesta demonstração. Nada foi enviado ao servidor."
         : "Escala salva com sucesso.",
     );
+  }
+  async function exportDisplayed(kind: "pdf" | "timesheet" | "xlsx" | "csv") {
+    if (!schedule) return;
+    const context =
+      frozen ?? (await resolvePublishedContext(data, withNeighbors(schedule)));
+    if (kind === "pdf")
+      await exportPDF(
+        context.schedule,
+        context.rules,
+        context.company,
+        context.employee,
+      );
+    if (kind === "timesheet")
+      await exportTimesheetPDF(
+        context.schedule,
+        context.company,
+        context.employee,
+        { preview: dirty || !saved },
+      );
+    if (kind === "xlsx")
+      await exportExcel(
+        context.schedule,
+        context.rules,
+        context.company,
+        context.employee,
+      );
+    if (kind === "csv")
+      exportCSV(
+        context.schedule,
+        context.rules,
+        context.employee,
+        context.company,
+      );
   }
   async function duplicate(all: boolean) {
     if (!company || !schedule) return;
@@ -1693,10 +2102,10 @@ export default function Workspace() {
           day.data === editedDay.data ? editedDay : day,
         );
         setSaveState("idle");
-        setDraft({ ...schedule, dias: changed });
-        setDirty(true);
+        changeDraft({ ...schedule, dias: changed });
       }
       assertDataContext(expected);
+      modalChanged.current = false;
       setModal(null);
       notify(
         modal.kind === "dia"
@@ -1708,6 +2117,7 @@ export default function Workspace() {
     });
   }
   const edit = (kind: Modal["kind"], row?: object) => {
+    modalChanged.current = false;
     if (
       scopedCompany &&
       (scopedCompany.situacao ?? "ativa") !== "ativa" &&
@@ -1781,6 +2191,21 @@ export default function Workspace() {
     cell?.focus({ preventScroll: true });
     edit("dia", day);
   };
+  const requestCloseModal = () => {
+    if (!modalChanged.current) {
+      setModal(null);
+      return;
+    }
+    setConfirmation({
+      title: "Descartar edição do formulário?",
+      message:
+        "As alterações deste formulário ainda não foram aplicadas. Você pode continuar editando ou confirmar o descarte.",
+      accept: () => {
+        modalChanged.current = false;
+        setModal(null);
+      },
+    });
+  };
   const navigate = (target: Page) => {
     if (scopedCompany && target !== "empresas") {
       openCompany(
@@ -1836,6 +2261,226 @@ export default function Workspace() {
       setPage("escalas");
     });
   };
+  const openTeamDay = (person: Employee, date: string) => {
+    const target = data.companies.find((c) => c.id === person.empresa_id);
+    if (!target) return;
+    changeContext(() => {
+      setCompanyScopeId(target.id);
+      setCompanyId(target.id);
+      setEmployeeId(person.id);
+      setModelId("");
+      setMonth(date.slice(0, 7));
+      setScheduleView("individual");
+      setPage("escalas");
+      setPendingDay({ employeeId: person.id, date });
+    });
+  };
+  async function generateBulk(
+    ids: string[],
+    targetMonth: string,
+    copy = false,
+  ): Promise<Schedule[]> {
+    if (!company || readbackPending)
+      throw new Error("Escolha uma empresa e atualize seus dados.");
+    const expected = activeDataContext.current,
+      results: Schedule[] = [];
+    const owned = new Map<string, Model>();
+    for (const id of ids) {
+      const person = data.employees.find(
+        (e) => e.id === id && e.empresa_id === company.id,
+      );
+      if (!person) throw new Error("Funcionário fora da empresa ativa.");
+      const source = data.schedules.find(
+        (s) =>
+          s.funcionario_id === id &&
+          s.empresa_id === company.id &&
+          s.mes.startsWith(month),
+      );
+      const resolved = copy
+        ? data.models.find((m) => m.id === source?.modelo_id)
+        : resolveEmployeeModelWithOrigin(person, company, data.models).model;
+      if (!resolved)
+        throw new Error(
+          `${person.nome}: defina um modelo individual ou padrão da empresa.`,
+        );
+      const selected = owned.get(resolved.id) ?? (await ownModel(resolved));
+      assertDataContext(expected);
+      owned.set(resolved.id, selected);
+      let next = createSchedule(person, selected, targetMonth);
+      if (copy) {
+        if (!source)
+          throw new Error(
+            `${person.nome}: não há escala salva na competência de origem.`,
+          );
+        next = withNeighbors({
+          ...next,
+          dias: preserveIndividualExceptions(
+            mergeGeneratedCalendarPolicy(
+              duplicateDays(
+                duplicationBaseDays(
+                  source.dias.filter((d) => d.data.startsWith(month)),
+                ),
+                targetMonth,
+                selected,
+                employeeLocation(company, person, data.establishments ?? []),
+                data.holidays,
+                false,
+              ),
+              next.dias,
+            ),
+            next.dias,
+          ),
+        });
+      }
+      results.push(next);
+    }
+    return results;
+  }
+  async function importEmployees(items: Employee[]) {
+    if (!scopedCompany || (scopedCompany.situacao ?? "ativa") !== "ativa")
+      throw new Error("Abra uma empresa ativa para importar.");
+    const expected = activeDataContext.current;
+    if (
+      items.some(
+        (e) =>
+          e.empresa_id !== scopedCompany.id ||
+          data.employees.some((old) => old.id === e.id),
+      )
+    )
+      throw new Error(
+        "A importação aceita somente novos vínculos da empresa ativa.",
+      );
+    if (demo)
+      setData((current) => ({
+        ...current,
+        employees: [...current.employees, ...items],
+      }));
+    else {
+      await importCompanyEmployees(scopedCompany.id, items);
+      if (!(await refreshAfterCommit(expected, "Importação"))) return;
+    }
+    notify(
+      `${items.length} funcionário(s) importado(s)${demo ? " nesta demonstração" : ""}.`,
+    );
+  }
+  async function persistOperation(op: CompanyOperation) {
+    if (
+      !scopedCompany ||
+      op.empresa_id !== scopedCompany.id ||
+      (scopedCompany.situacao ?? "ativa") !== "ativa"
+    )
+      throw new Error("Abra uma empresa ativa para esta operação.");
+    const expected = activeDataContext.current;
+    if (demo)
+      setData((current) => ({
+        ...current,
+        operations: [
+          ...(current.operations ?? []).filter((x) => x.id !== op.id),
+          op,
+        ],
+      }));
+    else {
+      await saveCompanyOperation(scopedCompany.id, {
+        ...op,
+        id: (rawData.operations ?? []).some((old) => old.id === op.id)
+          ? op.id
+          : "",
+      });
+      await refreshAfterCommit(expected, "Gravação");
+    }
+  }
+  async function removeOperation(id: string) {
+    if (!scopedCompany || (scopedCompany.situacao ?? "ativa") !== "ativa")
+      throw new Error("Abra uma empresa ativa.");
+    const expected = activeDataContext.current;
+    if (demo)
+      setData((current) => ({
+        ...current,
+        operations: (current.operations ?? []).filter(
+          (x) => x.empresa_id !== scopedCompany.id || x.id !== id,
+        ),
+      }));
+    else {
+      await deleteCompanyOperation(scopedCompany.id, id);
+      await refreshAfterCommit(expected, "Exclusão");
+    }
+  }
+  async function applySwapOperation(request: CompanyOperation) {
+    if (
+      !scopedCompany ||
+      readbackPending ||
+      (scopedCompany.situacao ?? "ativa") !== "ativa"
+    )
+      throw new Error("Abra uma empresa ativa e atualize os dados.");
+    const pending = (rawData.operations ?? []).find(
+      (op) =>
+        op.id === request.id &&
+        op.empresa_id === scopedCompany.id &&
+        op.status === "pendente",
+    );
+    if (!pending)
+      throw new Error(
+        "Atualize a solicitação pendente antes de aplicar a troca.",
+      );
+    const assessment = assessSwap(rawData, pending);
+    if (
+      !assessment.canApply ||
+      assessment.schedules.some((s) => isScheduleLocked(s))
+    )
+      throw new Error(
+        "Confira os impedimentos, fontes e situação das duas escalas antes de trocar.",
+      );
+    const expected = activeDataContext.current;
+    if (demo) {
+      const now = new Date().toISOString();
+      const changed = assessment.schedules.map((s) => ({
+        ...s,
+        revisao: (s.revisao ?? 0) + 1,
+        status: "rascunho" as const,
+        updated_at: now,
+      }));
+      setData((current) => ({
+        ...current,
+        schedules: current.schedules.map(
+          (s) => changed.find((next) => next.id === s.id) ?? s,
+        ),
+        operations: (current.operations ?? []).map((op) =>
+          op.id === pending.id
+            ? { ...op, status: "aprovado" as const, updated_at: now }
+            : op,
+        ),
+        logs: [
+          ...changed.map((next) => ({
+            id: crypto.randomUUID(),
+            tabela: "escalas",
+            acao: "UPDATE",
+            alterado_em: now,
+            registro_id: next.id,
+            empresa_id: next.empresa_id,
+            ator_id: "demo-user",
+            antes: current.schedules.find(
+              (s) => s.id === next.id,
+            ) as unknown as Record<string, unknown>,
+            depois: next as unknown as Record<string, unknown>,
+            campos: ["dias", "revisao"],
+          })),
+          ...current.logs,
+        ],
+      }));
+    } else {
+      await applyCompanySwap(scopedCompany.id, pending, assessment.schedules);
+      try {
+        await refresh(expected);
+      } catch (error) {
+        assertDataContext(expected);
+        setReadbackPending(true);
+        notify(
+          "Troca gravada nas duas escalas. Atualize os dados antes de continuar.",
+          true,
+        );
+      }
+    }
+  }
   const employeeTimesheet = (person: Employee) => {
     const target = data.companies.find(
       (entry) => entry.id === person.empresa_id,
@@ -1864,10 +2509,11 @@ export default function Workspace() {
       setScheduleView("individual");
       setPage("escalas");
       void perform(async () => {
+        const context = await resolvePublishedContext(data, selected);
         await exportTimesheetPDF(
-          selected,
-          employeeLocation(target, person, data.establishments ?? []),
-          person,
+          context.schedule,
+          context.company,
+          context.employee,
         );
       });
     });
@@ -1882,6 +2528,8 @@ export default function Workspace() {
             "feriados",
             "historico",
             "regras",
+            "operacoes",
+            "relatorios",
           ].includes(page)
         ? (page as CompanyView)
         : "visao_geral";
@@ -2221,7 +2869,10 @@ export default function Workspace() {
           onClick={() => setMobile(false)}
         />
       )}
-      <aside className={`sidebar ${mobile ? "open" : ""}`}>
+      <a href="#main-content" className="skip-link">
+        Ir para conteúdo
+      </a>
+      <aside id="workspace-menu" className={`sidebar ${mobile ? "open" : ""}`}>
         <Brand light />
         <div className="nav-label">
           {companyScopeId ? "ADMINISTRAÇÃO DA EMPRESA" : "ÁREA GERAL"}
@@ -2253,7 +2904,7 @@ export default function Workspace() {
         <div className="side-note">
           <ShieldCheck size={20} className="mb-2" />
           <strong>Regras claras, decisões seguras.</strong>Confira os parâmetros
-          legais e a CCT antes de aprovar cada escala.
+          legais e o instrumento aplicável antes de aprovar cada escala.
         </div>
         <div className="profile">
           <div className="avatar">DP</div>
@@ -2272,7 +2923,10 @@ export default function Workspace() {
             onClick={() =>
               perform(async () => {
                 if (
-                  dirty &&
+                  (dirty ||
+                    bulkDirty ||
+                    operationDirty ||
+                    modalChanged.current) &&
                   !window.confirm("Sair e descartar alterações não salvas?")
                 )
                   return;
@@ -2280,6 +2934,16 @@ export default function Workspace() {
                   const { error } = await supabase.auth.signOut();
                   if (error) throw error;
                 }
+                if (localOwner)
+                  await clearOwnerDrafts(localOwner).catch(() => {});
+                setModal(null);
+                modalChanged.current = false;
+                setBulkDirty(false);
+                setOperationDirty(false);
+                setBulkEpoch((value) => value + 1);
+                setRecovery(null);
+                setReadbackPending(false);
+                setDraftHistory({ past: [], future: [] });
                 setDemo(false);
                 setData(emptyData);
                 setScheduleView("individual");
@@ -2306,13 +2970,15 @@ export default function Workspace() {
           </button>
         </div>
       </aside>
-      <main className="main">
+      <main className="main" id="main-content" tabIndex={-1}>
         <header className="topbar">
           <div className="actions">
             <button
               className="icon-button mobile-menu"
               onClick={() => setMobile(true)}
               aria-label="Abrir menu"
+              aria-expanded={mobile}
+              aria-controls="workspace-menu"
             >
               <Menu size={21} />
             </button>
@@ -2325,6 +2991,7 @@ export default function Workspace() {
             </span>
           </div>
           <div className="top-actions">
+            <ThemeSwitch />
             <label className="company-switcher">
               Empresa ativa
               <select
@@ -2363,6 +3030,71 @@ export default function Workspace() {
           </div>
         </header>
         <div className="content">
+          {(rawData.schemaWarnings ?? []).map((message) => (
+            <div className="banner" role="status" key={message}>
+              {message}
+            </div>
+          ))}
+          {readbackPending && (
+            <div className="banner" role="alert">
+              <div>
+                <strong>
+                  Gravação concluída; atualização da tela pendente.
+                </strong>
+                <p>
+                  Os dados foram gravados. Atualize antes de voltar a editar.
+                </p>
+                <button
+                  className="button"
+                  disabled={busy}
+                  onClick={() =>
+                    perform(async () => {
+                      await refresh();
+                      setReadbackPending(false);
+                      notify("Dados atualizados.");
+                    })
+                  }
+                >
+                  Atualizar dados
+                </button>
+              </div>
+            </div>
+          )}
+          {recovery && !dirty && !scheduleReadOnly && (
+            <div className="banner neutral" role="status">
+              <div>
+                <strong>
+                  Há uma prévia recuperável desta pessoa e competência.
+                </strong>
+                <p>
+                  Guardada neste navegador em{" "}
+                  {new Date(recovery.savedAt).toLocaleString("pt-BR")}. A
+                  recuperação não altera a escala salva.
+                </p>
+                <div className="actions">
+                  <button
+                    className="button"
+                    onClick={() => {
+                      setDraft(recovery.schedule);
+                      setDirty(true);
+                      setRecovery(null);
+                    }}
+                  >
+                    Recuperar prévia
+                  </button>
+                  <button
+                    className="button"
+                    onClick={() => {
+                      void deleteDraft(recovery.key);
+                      setRecovery(null);
+                    }}
+                  >
+                    Descartar recuperação
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
           {demo && (
             <div className="banner neutral">
               <BookOpen size={16} />
@@ -2384,6 +3116,15 @@ export default function Workspace() {
               onEditCompany={() => edit("empresa", scopedCompany)}
               onStatusChange={changeCompanyStatus}
               busy={busy}
+            />
+          )}
+          {(page === "inicio" || page === "company-overview") && (
+            <WorkQueue
+              data={scopedCompany ? scopedData : data}
+              month={month}
+              onOpenEmployee={openEmployee}
+              onOpenSchedule={employeeSchedules}
+              onOpenRules={(target) => openCompany(target, "regras")}
             />
           )}
           {page === "inicio" && (
@@ -2416,7 +3157,10 @@ export default function Workspace() {
                 />
                 <Stat
                   label="Funcionários"
-                  value={data.employees.length}
+                  value={
+                    data.employees.filter((e) => e.situacao !== "inativo")
+                      .length
+                  }
                   note="Pessoas com cadastro ativo"
                   icon={Users}
                 />
@@ -2441,7 +3185,13 @@ export default function Workspace() {
                     <br />
                     {!data.rules.length
                       ? "Importe os parâmetros iniciais e revise as fontes e vigências."
-                      : "A proposta de transição para 42h e 40h não foi verificada em fonte oficial. Confirme datas e exceções da CCT."}{" "}
+                      : `${pendingRules} parâmetro(s) aguardam conferência: ${data.rules
+                          .filter((r) => !r.confirmado)
+                          .slice(0, 2)
+                          .map((r) => r.nome)
+                          .join(
+                            ", ",
+                          )}. Confira as fontes e vigências correspondentes.`}{" "}
                     <button
                       className="underline font-semibold"
                       onClick={() => navigate("regras")}
@@ -2473,9 +3223,8 @@ export default function Workspace() {
                           </tr>
                         </thead>
                         <tbody>
-                          {data.schedules
-                            .slice(-5)
-                            .reverse()
+                          {recentSchedules(data)
+                            .slice(0, 5)
                             .map((s) => (
                               <tr key={s.id}>
                                 <td>
@@ -2658,6 +3407,25 @@ export default function Workspace() {
                   </p>
                 </div>
                 <div className="schedule-heading-actions">
+                  <button
+                    className="button small"
+                    disabled={
+                      !schedule ||
+                      !!calculation.error ||
+                      scheduleView !== "individual"
+                    }
+                    onClick={() => {
+                      const calendar =
+                        document.getElementById("schedule-calendar");
+                      calendar?.scrollIntoView({
+                        block: "start",
+                        behavior: "smooth",
+                      });
+                      calendar?.focus({ preventScroll: true });
+                    }}
+                  >
+                    Ir ao calendário
+                  </button>
                   <span className="pill">
                     <CalendarDays size={12} />
                     COMPETÊNCIA {month.slice(5)}/{month.slice(0, 4)}
@@ -2686,6 +3454,36 @@ export default function Workspace() {
                   </div>
                 </div>
               </div>
+              <details className="panel mb-4">
+                <summary className="panel-head">
+                  Gerar, editar e duplicar escalas em lote
+                </summary>
+                <div className="panel-body">
+                  <BulkSchedules
+                    key={`${companyScopeId ?? companyId}:${bulkEpoch}`}
+                    data={data}
+                    companyId={companyScopeId ?? companyId}
+                    month={month}
+                    busy={busy}
+                    onDirtyChange={setBulkDirty}
+                    onGenerate={(ids, target) =>
+                      scopedAction(() => generateBulk(ids, target))
+                    }
+                    onDuplicate={(ids, target) =>
+                      scopedAction(() => generateBulk(ids, target, true))
+                    }
+                    onSave={(items) =>
+                      scopedAction(async () => {
+                        const ok = await persistSchedules(items);
+                        if (!ok) return;
+                        notify(
+                          `${items.length} escala(s) salva(s) como rascunho.`,
+                        );
+                      })
+                    }
+                  />
+                </div>
+              </details>
               {scheduleView === "team" ? (
                 <>
                   <section className="panel">
@@ -2710,11 +3508,15 @@ export default function Workspace() {
                     </div>
                   </section>
                   <TeamSchedule
-                    key={month}
+                    key={companyScopeId ?? "all"}
                     data={data}
                     month={month}
                     companyId={companyScopeId}
                     onOpen={employeeSchedules}
+                    onOpenDay={openTeamDay}
+                    onMonthChange={(value) =>
+                      changeContext(() => setMonth(value))
+                    }
                     hasUnsavedPreview={dirty}
                     onReturnToPreview={() => setScheduleView("individual")}
                   />
@@ -2806,9 +3608,9 @@ export default function Workspace() {
                       </div>
                       {scheduleReadOnly && (
                         <p className="warning-text mt-4">
-                          Consulta preservada: reative a empresa e o vínculo
-                          para gerar ou alterar jornadas. As exportações
-                          continuam disponíveis.
+                          Consulta preservada. Reative a empresa/vínculo, reabra
+                          a escala aprovada ou atualize os dados antes de
+                          editar. As exportações continuam disponíveis.
                         </p>
                       )}
                       {employee && (
@@ -2852,8 +3654,7 @@ export default function Workspace() {
                               const owned = await ownModel(model);
                               assertDataContext(expected);
                               const s = createSchedule(employee, owned, month);
-                              setDraft(s);
-                              setDirty(true);
+                              changeDraft(s);
                               setSaveState("idle");
                               notify(
                                 `${!model.empresa_id ? "Modelo-base copiado para esta empresa. " : ""}Prévia gerada. Confira as semanas, os alertas e salve a escala.`,
@@ -2905,11 +3706,85 @@ export default function Workspace() {
                           employee && edit("funcionario", employee)
                         }
                       />
+                      <div className="schedule-control-strip">
+                        <div
+                          className="calendar-mode-controls"
+                          role="group"
+                          aria-label="Visualização do calendário"
+                        >
+                          {(
+                            [
+                              ["month", "Mês"],
+                              ["week", "Semana"],
+                              ["compact", "Compacto"],
+                            ] as const
+                          ).map(([value, label]) => (
+                            <button
+                              key={value}
+                              className={`button small ${calendarView === value ? "primary" : ""}`}
+                              aria-pressed={calendarView === value}
+                              onClick={() => setCalendarView(value)}
+                            >
+                              {label}
+                            </button>
+                          ))}
+                          <button
+                            className="button small"
+                            aria-label="Competência anterior"
+                            onClick={() =>
+                              changeContext(() =>
+                                setMonth(shiftMonth(month, -1)),
+                              )
+                            }
+                          >
+                            ‹
+                          </button>
+                          <button
+                            className="button small"
+                            aria-label="Próxima competência"
+                            onClick={() =>
+                              changeContext(() =>
+                                setMonth(shiftMonth(month, 1)),
+                              )
+                            }
+                          >
+                            ›
+                          </button>
+                          {calendarView === "week" && (
+                            <input
+                              type="date"
+                              aria-label="Semana do calendário"
+                              value={weekDate || `${month}-01`}
+                              onChange={(e) =>
+                                setWeekDate(e.target.value || `${month}-01`)
+                              }
+                            />
+                          )}
+                        </div>
+                        <label className="check-label">
+                          <input
+                            type="checkbox"
+                            checked={recoverDrafts}
+                            onChange={(e) => {
+                              setRecoverDrafts(e.target.checked);
+                              localStorage.setItem(
+                                "cont-contabil-recovery",
+                                e.target.checked ? "1" : "0",
+                              );
+                              if (!e.target.checked && localOwner)
+                                void clearOwnerDrafts(localOwner);
+                            }}
+                          />
+                          Recuperar prévias neste navegador por até 7 dias
+                        </label>
+                      </div>
                       <section
                         className="panel"
                         aria-label="Calendário da escala"
+                        id="schedule-calendar"
+                        tabIndex={-1}
                       >
-                        <div className="panel-head">
+                        <div className="panel-head schedule-calendar-head">
                           <div>
                             <h2>{monthLabel(month)}</h2>
                             <p className="subtitle !mt-1 !text-xs">
@@ -2923,15 +3798,7 @@ export default function Workspace() {
                               className="button small"
                               disabled={busy || !company}
                               onClick={() =>
-                                perform(async () => {
-                                  if (company)
-                                    await exportPDF(
-                                      withNeighbors(schedule),
-                                      scheduleRules,
-                                      company,
-                                      employee,
-                                    );
-                                })
+                                perform(() => exportDisplayed("pdf"))
                               }
                             >
                               <FileText size={14} />
@@ -2942,19 +3809,7 @@ export default function Workspace() {
                               title="Gerar folha de ponto em PDF conforme o calendário atual"
                               disabled={busy || !company || !employee}
                               onClick={() =>
-                                perform(async () => {
-                                  if (company && employee)
-                                    await exportTimesheetPDF(
-                                      schedule,
-                                      employeeLocation(
-                                        company,
-                                        employee,
-                                        data.establishments ?? [],
-                                      ),
-                                      employee,
-                                      { preview: dirty || !saved },
-                                    );
-                                })
+                                perform(() => exportDisplayed("timesheet"))
                               }
                             >
                               <FileText size={14} />
@@ -2964,17 +3819,7 @@ export default function Workspace() {
                               className="button small"
                               disabled={busy || !company}
                               onClick={() =>
-                                perform(async () => {
-                                  if (company)
-                                    await exportExcel(
-                                      withNeighbors(schedule),
-                                      scheduleRules,
-                                      company,
-                                      data.employees.find(
-                                        (e) => e.id === schedule.funcionario_id,
-                                      ),
-                                    );
-                                })
+                                perform(() => exportDisplayed("xlsx"))
                               }
                             >
                               <FileSpreadsheet size={14} />
@@ -2984,14 +3829,7 @@ export default function Workspace() {
                               className="button small"
                               disabled={busy}
                               onClick={() =>
-                                exportCSV(
-                                  schedule,
-                                  scheduleRules,
-                                  data.employees.find(
-                                    (e) => e.id === schedule.funcionario_id,
-                                  ),
-                                  company,
-                                )
+                                perform(() => exportDisplayed("csv"))
                               }
                             >
                               <Download size={14} />
@@ -3015,6 +3853,7 @@ export default function Workspace() {
                         </div>
                         <div
                           className="calendar"
+                          data-calendar-view={calendarView}
                           role="grid"
                           aria-label={`Calendário de ${monthLabel(month)}`}
                         >
@@ -3030,6 +3869,7 @@ export default function Workspace() {
                             <div
                               role="columnheader"
                               className="cal-heading"
+                              hidden={calendarView !== "month"}
                               key={n}
                             >
                               {n}
@@ -3041,7 +3881,11 @@ export default function Workspace() {
                                 (dateUTC(`${month}-01`).getUTCDay() + 6) % 7,
                             },
                             (_, i) => (
-                              <div key={`blank-${i}`} className="day blank" />
+                              <div
+                                key={`blank-${i}`}
+                                className="day blank"
+                                hidden={calendarView !== "month"}
+                              />
                             ),
                           )}
                           {schedule.dias
@@ -3071,6 +3915,15 @@ export default function Workspace() {
                                   key={d.data}
                                   id={`escala-dia-${d.data}`}
                                   data-date={d.data}
+                                  hidden={
+                                    calendarView === "week" &&
+                                    (d.data <
+                                      calendarWeek(weekDate || `${month}-01`)
+                                        .start ||
+                                      d.data >
+                                        calendarWeek(weekDate || `${month}-01`)
+                                          .end)
+                                  }
                                   data-day-kind={presentation.kind}
                                   data-expediente={presentation.status}
                                   data-problem={problem || undefined}
@@ -3079,6 +3932,29 @@ export default function Workspace() {
                                   disabled={scheduleReadOnly}
                                   className={`day ${computeDay(d, scheduleRules, schedule.dias).worked === 0 ? "rest" : ""} ${problem ? `has-${problem}` : ""} ${activeDate === d.data ? "selected" : ""}`}
                                   onClick={() => edit("dia", d)}
+                                  onKeyDown={(event) => {
+                                    const offsets: Record<string, number> = {
+                                      ArrowLeft: -1,
+                                      ArrowRight: 1,
+                                      ArrowUp: -7,
+                                      ArrowDown: 7,
+                                    };
+                                    if (event.key in offsets) {
+                                      event.preventDefault();
+                                      const next = addDays(
+                                        d.data,
+                                        offsets[event.key],
+                                      );
+                                      if (calendarView === "week")
+                                        setWeekDate(next);
+                                      setActiveDate(next);
+                                      requestAnimationFrame(() =>
+                                        document
+                                          .getElementById(`escala-dia-${next}`)
+                                          ?.focus(),
+                                      );
+                                    }
+                                  }}
                                   aria-label={`${dateLabel(d.data)}${violations.length ? `, ${violations.length} violações impeditivas` : attention.length ? `, ${attention.length} avisos` : ""}: ${presentation.label}${presentation.description ? `, ${presentation.description}` : ""}, ${presentation.status}. ${d.intervalos.length ? shiftText(d.intervalos) : computeDay(d, scheduleRules, schedule.dias).worked > 0 ? "Continuação do turno anterior" : "Folga"}. Editar.`}
                                 >
                                   <span className="day-number">
@@ -3516,7 +4392,225 @@ export default function Workspace() {
                       </div>
                     </>
                   )}
+                  {schedule && !calculation.error && (
+                    <>
+                      <div className="schedule-save-bar">
+                        <div>
+                          <strong>
+                            {schedule.nome_funcionario ?? employee?.nome}
+                          </strong>
+                          <span className="muted">
+                            {" "}
+                            · {monthLabel(month)} · {saveLabel}
+                          </span>
+                        </div>
+                        <div className="actions">
+                          <button
+                            className="button small"
+                            disabled={
+                              busy ||
+                              scheduleReadOnly ||
+                              !draftHistory.past.length
+                            }
+                            onClick={() => undoDraft()}
+                          >
+                            Desfazer
+                          </button>
+                          <button
+                            className="button small"
+                            disabled={
+                              busy ||
+                              scheduleReadOnly ||
+                              !draftHistory.future.length
+                            }
+                            onClick={() => undoDraft(true)}
+                          >
+                            Refazer
+                          </button>
+                          <button
+                            className="button primary"
+                            disabled={
+                              busy || scheduleReadOnly || (!dirty && !!saved)
+                            }
+                            onClick={() => perform(saveCurrent)}
+                          >
+                            {saveState === "saving"
+                              ? "Salvando…"
+                              : dirty || !saved
+                                ? "Salvar alterações"
+                                : "Salva"}
+                          </button>
+                          <button
+                            className="button small"
+                            onClick={() =>
+                              document
+                                .getElementById("schedule-reports")
+                                ?.scrollIntoView({ behavior: "smooth" })
+                            }
+                          >
+                            Exportar documentos
+                          </button>
+                        </div>
+                      </div>
+                      <details className="panel" id="schedule-reports">
+                        <summary className="panel-head">
+                          Pré-visualizar e exportar documentos
+                        </summary>
+                        <div className="panel-body">
+                          <ReportCenter
+                            key={`${companyId}:${month}`}
+                            data={reportData}
+                            month={month}
+                            companyId={companyId}
+                            schedule={withNeighbors(schedule)}
+                            preview={dirty}
+                            onError={(message) => notify(message, true)}
+                          />
+                        </div>
+                      </details>
+                      {saved && !dirty && (
+                        <ScheduleGovernance
+                          key={`${saved.id}:${saved.revisao ?? 0}`}
+                          schedule={{
+                            ...withNeighbors(saved),
+                            status: saved.status,
+                            revisao: saved.revisao,
+                          }}
+                          data={reportData}
+                          demo={demo}
+                          busy={busy}
+                          onTransition={(next, reason, review) =>
+                            scopedAction(async () => {
+                              const expected = activeDataContext.current;
+                              if (demo) {
+                                setData(
+                                  applyDemoTransition(
+                                    rawData,
+                                    saved,
+                                    next,
+                                    reason,
+                                    "demo-user",
+                                    {
+                                      violations: review.impedimentos,
+                                      pendingSources: review.fontes_pendentes,
+                                    },
+                                  ),
+                                );
+                              } else {
+                                await transitionScheduleStatus(
+                                  saved.empresa_id,
+                                  saved,
+                                  next,
+                                  reason,
+                                  review,
+                                );
+                                try {
+                                  await refresh(expected);
+                                } catch (error) {
+                                  setReadbackPending(true);
+                                  throw new Error(
+                                    "Situação gravada. Atualize os dados antes de continuar.",
+                                  );
+                                }
+                              }
+                              notify("Situação da escala atualizada.");
+                            })
+                          }
+                        />
+                      )}
+                    </>
+                  )}
                 </>
+              )}
+            </>
+          )}
+          {page === "relatorios" && (
+            <>
+              <div className="page-head">
+                <div>
+                  <h1>Relatórios</h1>
+                  <p className="subtitle">
+                    Pré-visualize e exporte documentos individuais ou em lote.
+                  </p>
+                </div>
+                <Field label="Competência dos relatórios">
+                  <input
+                    type="month"
+                    value={month}
+                    onChange={(e) =>
+                      /^\d{4}-(0[1-9]|1[0-2])$/.test(e.target.value) &&
+                      Number(e.target.value.slice(0, 4)) >= 1900 &&
+                      Number(e.target.value.slice(0, 4)) <= 2200 &&
+                      changeContext(() => setMonth(e.target.value))
+                    }
+                  />
+                </Field>
+              </div>
+              <ReportCenter
+                key={`${companyScopeId ?? "all"}:${month}`}
+                data={data}
+                month={month}
+                companyId={companyScopeId}
+                schedule={draft ? schedule : undefined}
+                preview={dirty}
+                onError={(message) => notify(message, true)}
+              />
+            </>
+          )}
+          {page === "operacoes" && (
+            <>
+              <div className="page-head">
+                <div>
+                  <h1>Operações da empresa</h1>
+                  <p className="subtitle">
+                    Ausências, cobertura, solicitações, documentos e realizado.
+                  </p>
+                </div>
+                <Field label="Competência das operações">
+                  <input
+                    type="month"
+                    value={month}
+                    onChange={(e) =>
+                      /^\d{4}-(0[1-9]|1[0-2])$/.test(e.target.value) &&
+                      Number(e.target.value.slice(0, 4)) >= 1900 &&
+                      Number(e.target.value.slice(0, 4)) <= 2200 &&
+                      changeContext(() => setMonth(e.target.value))
+                    }
+                  />
+                </Field>
+              </div>
+              {scopedCompany ? (
+                <CompanyOperations
+                  key={`${scopedCompany.id}:${month}:${bulkEpoch}`}
+                  data={data}
+                  companyId={scopedCompany.id}
+                  month={month}
+                  busy={busy || readbackPending}
+                  onDirtyChange={setOperationDirty}
+                  onApplySwap={(_items, op) =>
+                    scopedAction(() => applySwapOperation(op))
+                  }
+                  onOpenEmployee={(id, date) => {
+                    const person = data.employees.find(
+                      (e) => e.id === id && e.empresa_id === scopedCompany.id,
+                    );
+                    if (person) openTeamDay(person, date);
+                  }}
+                  onSave={(op) => scopedAction(() => persistOperation(op))}
+                  onRemove={(id) => scopedAction(() => removeOperation(id))}
+                />
+              ) : (
+                <Empty
+                  text="Abra uma empresa para administrar suas operações."
+                  action={
+                    <button
+                      className="button"
+                      onClick={() => navigate("empresas")}
+                    >
+                      Selecionar empresa
+                    </button>
+                  }
+                />
               )}
             </>
           )}
@@ -3528,6 +4622,26 @@ export default function Workspace() {
               onOpen={openCompany}
               onEdit={(c) => edit("empresa", c)}
             />
+          )}
+          {page === "funcionarios" && scopedCompany && (
+            <details className="panel mb-4">
+              <summary className="panel-head">
+                Importar funcionários de CSV ou Excel
+              </summary>
+              <div className="panel-body">
+                <EmployeeImport
+                  key={scopedCompany.id}
+                  company={scopedCompany}
+                  existing={data.employees}
+                  models={data.models}
+                  establishments={data.establishments}
+                  busy={busy}
+                  onImport={(items) =>
+                    scopedAction(() => importEmployees(items))
+                  }
+                />
+              </div>
+            </details>
           )}
           {page === "funcionarios" && (
             <EmployeeDirectory
@@ -3578,6 +4692,7 @@ export default function Workspace() {
           )}
           {scopedCompany && page === "feriados" && (
             <SpecialDates
+              data={rawData}
               company={scopedCompany}
               employees={data.employees}
               events={data.specialDates ?? []}
@@ -3907,18 +5022,14 @@ export default function Workspace() {
                           </div>
                         </div>
                         <div className="legal-values">
-                          {Object.entries(r.valor).map(([k, v]) => (
-                            <span key={k}>
-                              {k.replaceAll("_", " ")}:{" "}
-                              <b>
-                                {typeof v === "boolean"
-                                  ? v
-                                    ? "sim"
-                                    : "não"
-                                  : v}
-                              </b>
-                            </span>
-                          ))}
+                          {Object.entries(r.valor).map(([k, v]) => {
+                            const item = legalValuePresentation(k, v);
+                            return (
+                              <span key={k}>
+                                {item.label}: <b>{item.value}</b>
+                              </span>
+                            );
+                          })}
                         </div>
                         <p className="alert-source">Fonte: {r.fonte}</p>
                         <p className="warning-text mt-2">{r.observacao}</p>
@@ -3954,17 +5065,22 @@ export default function Workspace() {
           <p className="footer-note">
             Cont Contábil · Gerador de Jornadas
             <br />
-            Confira a legislação vigente e a convenção coletiva antes de aprovar
-            as escalas.
+            Confira a legislação vigente e o instrumento aplicável antes de
+            aprovar as escalas.
           </p>
         </div>
       </main>
       {modal && (
         <Dialog
           title={`${modal.row ? "Editar" : "Cadastrar"} ${{ empresa: "empresa", funcionario: "funcionário", modelo: "modelo de jornada", feriado: "feriado", regra: "parâmetro legal", dia: "dia da escala", data_especial: "data especial", estabelecimento: "estabelecimento" }[modal.kind]}`}
-          close={() => setModal(null)}
+          close={requestCloseModal}
         >
-          <form onSubmit={formSubmit}>
+          <form
+            ref={modalForm}
+            onSubmit={formSubmit}
+            onInputCapture={recordModalChange}
+            onChangeCapture={recordModalChange}
+          >
             <div className="form-grid">
               {modal.kind === "empresa" && (
                 <CompanyFields
@@ -4036,6 +5152,7 @@ export default function Workspace() {
               )}
               {modal.kind === "data_especial" && scopedCompany && (
                 <SpecialDateFields
+                  data={rawData}
                   key={String(modal.row?.id ?? "new")}
                   company={scopedCompany}
                   employees={data.employees}
@@ -4183,7 +5300,7 @@ export default function Workspace() {
               <button
                 className="button"
                 type="button"
-                onClick={() => setModal(null)}
+                onClick={requestCloseModal}
               >
                 Cancelar
               </button>

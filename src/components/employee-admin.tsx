@@ -77,6 +77,12 @@ export function EmployeeDirectory({
   const [search, setSearch] = useState("");
   const [companyFilter, setCompanyFilter] = useState("");
   const [status, setStatus] = useState("todos");
+  const [department, setDepartment] = useState("");
+  const [unit, setUnit] = useState("");
+  const [scheduleFilter, setScheduleFilter] = useState("todos");
+  const [order, setOrder] = useState("nome");
+  const [view, setView] = useState("cards");
+  const [page, setPage] = useState(1);
   const scoped = (data.employees as EmployeeSettings[]).filter(
     (employee) => !companyId || employee.empresa_id === companyId,
   );
@@ -89,10 +95,35 @@ export function EmployeeDirectory({
       return (
         (!selectedCompany || employee.empresa_id === selectedCompany) &&
         (!search || name.includes(normal(search))) &&
-        (status === "todos" || active(employee) === (status === "ativo"))
+        (status === "todos" || active(employee) === (status === "ativo")) &&
+        (!department || employee.setor === department) &&
+        (!unit ||
+          (unit === "principal"
+            ? !employee.estabelecimento_id
+            : employee.estabelecimento_id === unit)) &&
+        (scheduleFilter === "todos" ||
+          data.schedules.some(
+            (schedule) =>
+              schedule.empresa_id === employee.empresa_id &&
+              schedule.funcionario_id === employee.id &&
+              schedule.mes.startsWith(month),
+          ) ===
+            (scheduleFilter === "com"))
       );
     })
-    .sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR"));
+    .sort(
+      (a, b) =>
+        (order === "setor"
+          ? (a.setor ?? "").localeCompare(b.setor ?? "", "pt-BR")
+          : order === "matricula"
+            ? (a.matricula ?? "").localeCompare(b.matricula ?? "", "pt-BR", {
+                numeric: true,
+              })
+            : 0) || a.nome.localeCompare(b.nome, "pt-BR"),
+    );
+  const totalPages = Math.max(1, Math.ceil(visible.length / 20));
+  const currentPage = Math.min(page, totalPages);
+  const displayed = visible.slice((currentPage - 1) * 20, currentPage * 20);
   const currentCompany = data.companies.find(
     (company) => company.id === companyId,
   ) as CompanySettings | undefined;
@@ -130,7 +161,10 @@ export function EmployeeDirectory({
           <input
             type="search"
             value={search}
-            onChange={(event) => setSearch(event.target.value)}
+            onChange={(event) => {
+              setSearch(event.target.value);
+              setPage(1);
+            }}
             placeholder="Nome, matrícula ou setor"
           />
         </label>
@@ -139,7 +173,12 @@ export function EmployeeDirectory({
             Filtrar por empresa
             <select
               value={companyFilter}
-              onChange={(event) => setCompanyFilter(event.target.value)}
+              onChange={(event) => {
+                setCompanyFilter(event.target.value);
+                setDepartment("");
+                setUnit("");
+                setPage(1);
+              }}
             >
               <option value="">Todas as empresas</option>
               {data.companies.map((company) => (
@@ -154,21 +193,193 @@ export function EmployeeDirectory({
           Situação do vínculo
           <select
             value={status}
-            onChange={(event) => setStatus(event.target.value)}
+            onChange={(event) => {
+              setStatus(event.target.value);
+              setPage(1);
+            }}
           >
             <option value="todos">Todos</option>
             <option value="ativo">Ativos</option>
             <option value="inativo">Inativos</option>
           </select>
         </label>
+        <label>
+          Setor / departamento
+          <select
+            value={department}
+            onChange={(event) => {
+              setDepartment(event.target.value);
+              setPage(1);
+            }}
+          >
+            <option value="">Todos os setores</option>
+            {[
+              ...new Set(
+                scoped
+                  .filter(
+                    (employee) =>
+                      !selectedCompany ||
+                      employee.empresa_id === selectedCompany,
+                  )
+                  .map((employee) => employee.setor)
+                  .filter(Boolean),
+              ),
+            ]
+              .sort()
+              .map((name) => (
+                <option key={name} value={name}>
+                  {name}
+                </option>
+              ))}
+          </select>
+        </label>
+        <label>
+          Estabelecimento do vínculo
+          <select
+            value={unit}
+            onChange={(event) => {
+              setUnit(event.target.value);
+              setPage(1);
+            }}
+          >
+            <option value="">Todos os estabelecimentos</option>
+            <option value="principal">Localidade principal</option>
+            {(data.establishments ?? [])
+              .filter(
+                (entry) =>
+                  !selectedCompany || entry.empresa_id === selectedCompany,
+              )
+              .map((entry) => (
+                <option key={entry.id} value={entry.id}>
+                  {entry.nome}
+                </option>
+              ))}
+          </select>
+        </label>
+        <label>
+          Escala na competência
+          <select
+            value={scheduleFilter}
+            onChange={(event) => {
+              setScheduleFilter(event.target.value);
+              setPage(1);
+            }}
+          >
+            <option value="todos">Com ou sem escala</option>
+            <option value="sem">Sem escala</option>
+            <option value="com">Com escala salva</option>
+          </select>
+        </label>
+        <label>
+          Ordenar funcionários
+          <select
+            value={order}
+            onChange={(event) => {
+              setOrder(event.target.value);
+              setPage(1);
+            }}
+          >
+            <option value="nome">Nome</option>
+            <option value="matricula">Matrícula</option>
+            <option value="setor">Setor</option>
+          </select>
+        </label>
+        <label>
+          Visualização de funcionários
+          <select
+            value={view}
+            onChange={(event) => setView(event.target.value)}
+          >
+            <option value="cards">Cartões</option>
+            <option value="tabela">Tabela compacta</option>
+          </select>
+        </label>
+        <button
+          className="button small"
+          type="button"
+          onClick={() => {
+            setSearch("");
+            setCompanyFilter("");
+            setStatus("todos");
+            setDepartment("");
+            setUnit("");
+            setScheduleFilter("todos");
+            setPage(1);
+          }}
+        >
+          Limpar filtros
+        </button>
         <p className="muted" role="status">
           {visible.length} vínculo(s) encontrado(s) ·{" "}
           {scoped.filter(active).length} ativo(s) no contexto
         </p>
       </div>
-      {visible.length ? (
+      {visible.length && view === "tabela" ? (
+        <div className="panel panel-body overflow-x-auto">
+          <table className="w-full text-sm">
+            <caption className="text-left">
+              Funcionários · {month.slice(5, 7)}/{month.slice(0, 4)}
+            </caption>
+            <thead>
+              <tr>
+                <th>Nome</th>
+                <th>Matrícula</th>
+                <th>Setor</th>
+                <th>Carga semanal</th>
+                <th>Situação</th>
+                <th>Ações</th>
+              </tr>
+            </thead>
+            <tbody>
+              {displayed.map((employee) => (
+                <tr key={employee.id}>
+                  <td>
+                    <button
+                      className="employee-name-button"
+                      onClick={() => onOpen(employee)}
+                    >
+                      {employee.nome}
+                    </button>
+                  </td>
+                  <td>{employee.matricula || "—"}</td>
+                  <td>{employee.setor || "—"}</td>
+                  <td>
+                    {employee.carga_semanal_minutos
+                      ? formatMinutes(employee.carga_semanal_minutos)
+                      : "Revisar"}
+                  </td>
+                  <td>{active(employee) ? "Ativo" : "Inativo"}</td>
+                  <td>
+                    <div className="actions">
+                      <button
+                        className="button small"
+                        onClick={() => onSchedules(employee)}
+                      >
+                        Gerenciar escalas
+                      </button>
+                      <button
+                        className="button small"
+                        disabled={
+                          !canOperate(
+                            data.companies.find(
+                              (company) => company.id === employee.empresa_id,
+                            ),
+                          )
+                        }
+                        onClick={() => onEdit(employee)}
+                      >
+                        Editar funcionário
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : visible.length ? (
         <div className="employee-cards">
-          {visible.map((employee) => {
+          {displayed.map((employee) => {
             const company = data.companies.find(
               (item) => item.id === employee.empresa_id,
             ) as CompanySettings | undefined;
@@ -303,6 +514,30 @@ export function EmployeeDirectory({
               : "Esta empresa ainda não possui funcionários. Adicione o primeiro vínculo para configurar a jornada."}
           </div>
         </div>
+      )}
+      {totalPages > 1 && (
+        <nav
+          className="actions justify-between mt-4"
+          aria-label="Paginação dos funcionários"
+        >
+          <button
+            className="button small"
+            disabled={currentPage === 1}
+            onClick={() => setPage(currentPage - 1)}
+          >
+            Página anterior
+          </button>
+          <span role="status">
+            Página {currentPage} de {totalPages} · 20 vínculos por página
+          </span>
+          <button
+            className="button small"
+            disabled={currentPage === totalPages}
+            onClick={() => setPage(currentPage + 1)}
+          >
+            Próxima página
+          </button>
+        </nav>
       )}
     </section>
   );

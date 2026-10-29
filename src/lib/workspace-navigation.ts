@@ -7,6 +7,8 @@ const workspacePages = [
   "feriados",
   "regras",
   "historico",
+  "operacoes",
+  "relatorios",
   "company-overview",
   "company-settings",
   "employee-detail",
