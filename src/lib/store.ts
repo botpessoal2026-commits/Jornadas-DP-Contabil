@@ -110,6 +110,7 @@ function migrationError(error: unknown) {
 export async function loadData(
   companyId?: string | null,
   month?: string,
+  signal?: AbortSignal,
 ): Promise<Data> {
   if (!supabase) throw new Error("Configure o Supabase.");
   if (
@@ -123,13 +124,15 @@ export async function loadData(
   // queries at the API boundary rather than loading another company's records.
   const client = supabase;
   const directory = companyId
-    ? await readAllPages<Company>((from, to) =>
-        client
+    ? await readAllPages<Company>((from, to) => {
+        let query = client
           .from("empresas")
           .select("*", { count: "exact" })
           .order("id")
-          .range(from, to),
-      )
+          .range(from, to);
+        if (signal) query = query.abortSignal(signal);
+        return query;
+      })
     : null;
   if (companyId && !directory?.some((row) => row.id === companyId))
     throw new Error("Empresa indisponível ou sem permissão.");
@@ -158,6 +161,7 @@ export async function loadData(
           .order("id", { ascending: false })
           .limit(100);
         if (companyId) query = query.eq("empresa_id", companyId);
+        if (signal) query = query.abortSignal(signal);
         return query.then((response) => {
           if (response.error) throw new Error(response.error.message);
           return response.data;
@@ -191,6 +195,7 @@ export async function loadData(
           )
             query = query.or(`empresa_id.eq.${companyId},empresa_id.is.null`);
         }
+        if (signal) query = query.abortSignal(signal);
         return query.order("id").range(from, to);
       });
     }),
@@ -216,6 +221,7 @@ export async function loadData(
         .from("registros_operacionais")
         .select("*", { count: "exact" });
       if (companyId) query = query.eq("empresa_id", companyId);
+      if (signal) query = query.abortSignal(signal);
       return query.order("id").range(from, to);
     });
   } catch (error) {

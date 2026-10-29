@@ -38,6 +38,14 @@ import {
 } from "lucide-react";
 import type { User } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabase";
+import AuthFields, { UsernameFields, type AuthMode } from "./auth-fields";
+import {
+  getOwnUsername,
+  setOwnUsername,
+  signInWithUsername,
+  normalizeUsername,
+  usernameError,
+} from "@/lib/auth-username";
 import {
   emptyData,
   importDefaults,
@@ -192,7 +200,8 @@ type Modal = {
     | "regra"
     | "dia"
     | "data_especial"
-    | "estabelecimento";
+    | "estabelecimento"
+    | "acesso";
   row?: Record<string, unknown>;
 };
 const nav = [
@@ -378,9 +387,28 @@ export default function Workspace() {
       null,
     ),
     [modal, setModal] = useState<Modal | null>(null),
-    [authMode, setAuthMode] = useState<
-      "login" | "signup" | "reset" | "password"
-    >("login");
+    [authMode, setAuthMode] = useState<AuthMode>("login");
+  const [accountUsername, setAccountUsername] = useState<string | null>(null);
+  const [accountUsernameError, setAccountUsernameError] = useState<
+    string | null
+  >(null);
+  const commitReadbackPending = useRef(false);
+  useEffect(() => {
+    setAccountUsername(null);
+    setAccountUsernameError(null);
+    if (!supabase || !user || demo) return;
+    let alive = true;
+    getOwnUsername(supabase, user.id)
+      .then((username) => {
+        if (alive) setAccountUsername(username);
+      })
+      .catch((error) => {
+        if (alive) setAccountUsernameError(error.message);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [user?.id, demo]);
   const data = useMemo(() => projectData(rawData), [rawData]);
   const [companyId, setCompanyId] = useState(""),
     [employeeId, setEmployeeId] = useState(""),
@@ -468,7 +496,7 @@ export default function Workspace() {
   const operationPending = useRef(false);
   const [companyScopeId, setCompanyScopeId] = useState<string | null>(null);
   const activeDataContext = useRef("");
-  activeDataContext.current = `${user?.id ?? ""}|${companyScopeId ?? ""}`;
+  activeDataContext.current = `${demo ? "demo" : (user?.id ?? "")}|${companyScopeId ?? ""}`;
   const [detailEmployeeId, setDetailEmployeeId] = useState<string | null>(null);
   const [companyAudit, setCompanyAudit] = useState<{
     companyId: string;
@@ -604,6 +632,8 @@ export default function Workspace() {
       ) {
         void clearOwnerDrafts(authUserId.current).catch(() => {});
         setData(emptyData);
+        commitReadbackPending.current = false;
+        setReadbackPending(false);
         setScheduleView("individual");
         setDraft(null);
         setDirty(false);
@@ -639,6 +669,7 @@ export default function Workspace() {
       .then((d) => {
         if (alive) {
           setData(d);
+          commitReadbackPending.current = false;
           setReadbackPending(false);
         }
       })
@@ -1121,7 +1152,6 @@ export default function Workspace() {
       setOperationDirty(false);
       setBulkEpoch((value) => value + 1);
       setRecovery(null);
-      setReadbackPending(false);
       setDraftHistory({ past: [], future: [] });
       setDraft(null);
       setDirty(false);
@@ -1170,17 +1200,23 @@ export default function Workspace() {
       setBusy(false);
     }
   }
-  async function refresh(expected = activeDataContext.current) {
+  async function refresh(
+    expected = activeDataContext.current,
+    signal?: AbortSignal,
+  ) {
     assertDataContext(expected);
     if (!demo) {
-      const next = await loadData(companyScopeId);
+      const next = await loadData(companyScopeId, undefined, signal);
       assertDataContext(expected);
       setData(next);
+      commitReadbackPending.current = false;
     }
   }
   async function refreshAfterCommit(expected: string, label: string) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 8000);
     try {
-      await refresh(expected);
+      await refresh(expected, controller.signal);
       setReadbackPending(false);
       return true;
     } catch (error) {
@@ -1191,6 +1227,8 @@ export default function Workspace() {
         true,
       );
       return false;
+    } finally {
+      clearTimeout(timeout);
     }
   }
   async function rowSave(
@@ -1198,6 +1236,10 @@ export default function Workspace() {
     value: Record<string, unknown>,
     id?: string,
   ) {
+    if (readbackPending || commitReadbackPending.current)
+      throw new Error(
+        "A gravação anterior foi concluída. Atualize os dados antes de editar novamente.",
+      );
     const expected = activeDataContext.current;
     const key = (
       {
@@ -1335,7 +1377,27 @@ export default function Workspace() {
       rowId = targetCompanyId
         ? await saveCompanyRow(targetCompanyId, table, value, id)
         : await saveRow(table, value, id);
-      await refresh(expected);
+      assertDataContext(expected);
+      commitReadbackPending.current = true;
+      setReadbackPending(true);
+      // The write is confirmed independently from the following read.
+      const after = { ...before, ...value, id: rowId };
+      setData(
+        (current) =>
+          ({
+            ...current,
+            [key]: (current[key] ?? []).some((row) => row.id === rowId)
+              ? (current[key] ?? []).map((row) =>
+                  row.id === rowId ? after : row,
+                )
+              : [...(current[key] ?? []), after],
+          }) as Data,
+      );
+      if (modal && modal.kind !== "dia" && modal.kind !== "acesso") {
+        modalChanged.current = false;
+        setModal(null);
+      }
+      await refreshAfterCommit(expected, "Cadastro");
     }
     assertDataContext(expected);
     return rowId;
@@ -1788,13 +1850,24 @@ export default function Workspace() {
         throw new Error("O Supabase ainda não está conectado a este ambiente.");
       const email = pick(fd, "email"),
         password = pick(fd, "password");
+      const username = normalizeUsername(pick(fd, "username"));
+      if (authMode === "signup") {
+        const invalid = usernameError(username);
+        if (invalid) throw new Error(invalid);
+        const status = await fetch("/api/auth/username", { cache: "no-store" });
+        const availability = await status.json().catch(() => null);
+        if (!status.ok || availability?.available !== true)
+          throw new Error(
+            "A criação de acessos por usuário ainda não está disponível neste ambiente. Entre com uma conta existente ou contate o responsável.",
+          );
+      }
       const redirect = window.location.origin;
       const result =
         authMode === "signup"
           ? await supabase.auth.signUp({
               email,
               password,
-              options: { emailRedirectTo: redirect },
+              options: { emailRedirectTo: redirect, data: { username } },
             })
           : authMode === "reset"
             ? await supabase.auth.resetPasswordForEmail(email, {
@@ -1802,27 +1875,49 @@ export default function Workspace() {
               })
             : authMode === "password"
               ? await supabase.auth.updateUser({ password })
-              : await supabase.auth.signInWithPassword({ email, password });
+              : authMode === "email-login"
+                ? await supabase.auth.signInWithPassword({ email, password })
+                : await signInWithUsername(supabase, username, password);
       if (result.error) throw result.error;
       notify(
         authMode === "signup"
-          ? "Cadastro solicitado. Confira seu e-mail para confirmar o acesso."
+          ? "Cadastro solicitado. Confira seu e-mail para confirmar o acesso; depois entre com seu usuário e senha."
           : authMode === "reset"
             ? "Se houver uma conta para esse e-mail, enviaremos as instruções."
             : authMode === "password"
               ? "Senha atualizada."
               : "Acesso realizado.",
       );
-      if (authMode === "password") setAuthMode("login");
+      if (authMode === "password" || authMode === "signup")
+        setAuthMode("login");
     });
   }
   async function formSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!modal || (modal.kind === "dia" && !editedDay)) return;
+    if (readbackPending && modal.kind !== "acesso") {
+      notify(
+        "Os dados já foram gravados. Atualize a tela antes de editar novamente.",
+        true,
+      );
+      return;
+    }
     const fd = new FormData(event.currentTarget);
     const id = modal.row?.id as string | undefined;
     const expected = activeDataContext.current;
     await perform(async () => {
+      if (modal.kind === "acesso") {
+        if (!supabase || !user || demo)
+          throw new Error("Entre na sua conta para definir um usuário.");
+        const username = await setOwnUsername(supabase, pick(fd, "username"));
+        assertDataContext(expected);
+        setAccountUsername(username);
+        setAccountUsernameError(null);
+        modalChanged.current = false;
+        setModal(null);
+        notify("Usuário salvo. Sua senha e seus cadastros foram mantidos.");
+        return;
+      }
       if (modal.kind === "empresa") {
         const cnpj = pick(fd, "cnpj").replace(/\D/g, "");
         if (cnpj && !cnpjValid(cnpj))
@@ -1859,7 +1954,7 @@ export default function Workspace() {
           id,
         );
         assertDataContext(expected);
-        if (!id) {
+        if (!id && !commitReadbackPending.current) {
           setCompanyScopeId(savedCompanyId);
           setCompanyId(savedCompanyId);
           setEmployeeId("");
@@ -2110,15 +2205,24 @@ export default function Workspace() {
       modalChanged.current = false;
       setModal(null);
       notify(
-        modal.kind === "dia"
-          ? "Dia alterado na prévia. Salve a escala para registrar."
-          : demo
-            ? "Cadastro atualizado apenas nesta demonstração."
-            : "Cadastro salvo.",
+        commitReadbackPending.current
+          ? "Cadastro salvo no banco; atualização da tela pendente. Atualize os dados antes de editar novamente."
+          : modal.kind === "dia"
+            ? "Dia alterado na prévia. Salve a escala para registrar."
+            : demo
+              ? "Cadastro atualizado apenas nesta demonstração."
+              : "Cadastro salvo.",
       );
     });
   }
   const edit = (kind: Modal["kind"], row?: object) => {
+    if (readbackPending && kind !== "acesso") {
+      notify(
+        "Os dados já foram gravados. Atualize a tela antes de editar novamente.",
+        true,
+      );
+      return;
+    }
     modalChanged.current = false;
     if (
       scopedCompany &&
@@ -2667,8 +2771,10 @@ export default function Workspace() {
             </h1>
             <p className="subtitle">
               {authMode === "login"
-                ? "Entre para organizar as jornadas das suas empresas."
-                : "Use seu e-mail de trabalho para continuar."}
+                ? "Entre com seu usuário e senha para acessar os cadastros e as escalas da sua conta."
+                : authMode === "email-login"
+                  ? "Acesse sua conta existente e defina um usuário em Meu acesso. Seus dados serão mantidos."
+                  : "O e-mail é usado apenas no cadastro e na recuperação do acesso."}
             </p>
             {!supabase && (
               <div className="banner mt-6">
@@ -2680,31 +2786,7 @@ export default function Workspace() {
               </div>
             )}
             <form onSubmit={authSubmit}>
-              {authMode !== "password" && (
-                <Field label="E-mail">
-                  <input
-                    name="email"
-                    type="email"
-                    placeholder="voce@contabilidade.com.br"
-                    required
-                    autoComplete="email"
-                  />
-                </Field>
-              )}
-              {authMode !== "reset" && (
-                <Field label="Senha">
-                  <input
-                    name="password"
-                    type="password"
-                    minLength={8}
-                    required
-                    autoComplete={
-                      authMode === "login" ? "current-password" : "new-password"
-                    }
-                    placeholder="Pelo menos 8 caracteres"
-                  />
-                </Field>
-              )}
+              <AuthFields key={authMode} mode={authMode} />
               <button className="button primary" disabled={busy || !supabase}>
                 {busy ? (
                   <LoaderCircle size={16} className="animate-spin" />
@@ -2739,6 +2821,19 @@ export default function Workspace() {
                   : "Esqueci minha senha"}
               </button>
             </div>
+            {(authMode === "login" || authMode === "email-login") && (
+              <button
+                type="button"
+                className="button mt-4 w-full"
+                onClick={() =>
+                  setAuthMode(authMode === "login" ? "email-login" : "login")
+                }
+              >
+                {authMode === "login"
+                  ? "Entrar com e-mail existente"
+                  : "Voltar ao usuário e senha"}
+              </button>
+            )}
             <div className="login-demo mt-7 border-t pt-6">
               <button
                 className="button w-full"
@@ -2886,7 +2981,7 @@ export default function Workspace() {
           <div className="avatar">DP</div>
           <div className="min-w-0">
             <div className="truncate">
-              {demo ? "Modo demonstração" : user?.email}
+              {demo ? "Modo demonstração" : (accountUsername ?? "Minha conta")}
             </div>
             <small className="profile-caption">
               {demo ? "Dados fictícios" : "Área de acesso privado"}
@@ -3002,10 +3097,29 @@ export default function Workspace() {
             <span className={`pill ${demo ? "warn" : ""}`}>
               {demo ? "Demonstração" : "Acesso protegido"}
             </span>
+            {!demo && (
+              <button className="button small" onClick={() => edit("acesso")}>
+                Meu acesso
+              </button>
+            )}
             <div className="avatar !h-8 !w-8 text-xs">DP</div>
           </div>
         </header>
         <div className="content">
+          {!demo && user && !accountUsername && (
+            <div className="banner neutral" role="status">
+              <div>
+                <strong>Use um usuário e sua senha atual.</strong>
+                <p>
+                  {accountUsernameError ??
+                    "Defina seu nome de usuário em Meu acesso. Seus cadastros continuam nesta mesma conta."}
+                </p>
+                <button className="button small" onClick={() => edit("acesso")}>
+                  Definir meu usuário
+                </button>
+              </div>
+            </div>
+          )}
           {(rawData.schemaWarnings ?? []).map((message) => (
             <div className="banner" role="status" key={message}>
               {message}
@@ -3079,6 +3193,30 @@ export default function Workspace() {
                 apenas nesta sessão. As regras propostas ainda precisam de
                 conferência.
               </span>
+              <button
+                className="button small"
+                disabled={busy}
+                onClick={() =>
+                  changeContext(() => {
+                    setData(emptyData);
+                    setDataLoaded(false);
+                    setDataLoadError(null);
+                    setCompanyScopeId(null);
+                    setCompanyId("");
+                    setEmployeeId("");
+                    setModelId("");
+                    setDetailEmployeeId(null);
+                    setAuthMode("login");
+                    setPage("empresas");
+                    setDemo(false);
+                    commitReadbackPending.current = false;
+                    setReadbackPending(false);
+                    window.history.replaceState(null, "", "/");
+                  })
+                }
+              >
+                Usar minha conta com dados salvos
+              </button>
             </div>
           )}
           {scopedCompany && (
@@ -5063,7 +5201,11 @@ export default function Workspace() {
       </main>
       {modal && (
         <Dialog
-          title={`${modal.row ? "Editar" : "Cadastrar"} ${{ empresa: "empresa", funcionario: "funcionário", modelo: "modelo de jornada", feriado: "feriado", regra: "parâmetro legal", dia: "dia da escala", data_especial: "data especial", estabelecimento: "estabelecimento" }[modal.kind]}`}
+          title={
+            modal.kind === "acesso"
+              ? "Meu acesso"
+              : `${modal.row ? "Editar" : "Cadastrar"} ${{ empresa: "empresa", funcionario: "funcionário", modelo: "modelo de jornada", feriado: "feriado", regra: "parâmetro legal", dia: "dia da escala", data_especial: "data especial", estabelecimento: "estabelecimento" }[modal.kind]}`
+          }
           close={requestCloseModal}
         >
           <form
@@ -5073,6 +5215,9 @@ export default function Workspace() {
             onChangeCapture={recordModalChange}
           >
             <div className="form-grid">
+              {modal.kind === "acesso" && (
+                <UsernameFields username={accountUsername} />
+              )}
               {modal.kind === "empresa" && (
                 <CompanyFields
                   company={modal.row as unknown as Company | undefined}
@@ -5304,7 +5449,12 @@ export default function Workspace() {
                 ) : (
                   <Check size={15} />
                 )}
-                Salvar {modal.kind === "dia" ? "na prévia" : "cadastro"}
+                Salvar{" "}
+                {modal.kind === "dia"
+                  ? "na prévia"
+                  : modal.kind === "acesso"
+                    ? "usuário"
+                    : "cadastro"}
               </button>
             </div>
           </form>

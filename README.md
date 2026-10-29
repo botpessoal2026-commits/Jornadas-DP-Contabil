@@ -10,6 +10,14 @@ Aplicação em português para o Departamento Pessoal organizar empresas, funcio
 - Criação do projeto Supabase, aplicação da migration no serviço e publicação Vercel dependem do acesso às respectivas contas. Nenhum projeto pago é criado pelo código.
 - Regras e instrumentos não são certificados automaticamente. As referências legais são editáveis, têm vigência e fonte, e novas referências entram somente por importação explícita sem substituir cadastros.
 
+## Usuário, senha e persistência — 29/10/2026
+
+O acesso principal passa a usar **Usuário e Senha**, preservando o Supabase Auth. Contas anteriores entram por e-mail uma vez e definem o usuário em **Meu acesso**, mantendo o mesmo UUID, senha e cadastros. O e-mail continua somente no cadastro/recuperação. Uma conta nova não é criada para renomear o acesso existente.
+
+Os dados salvos da conta permanecem no Supabase. A demonstração (`?demo=1`) continua fictícia e reinicia ao recarregar; agora oferece **Usar minha conta com dados salvos**. Corrigido o tratamento de gravação concluída com falha na recarga para evitar repetição de INSERT. Campos ainda em prévia continuam exigindo o salvamento indicado na tela.
+
+Nova migration: `20261029150540_username_login_and_attempt_limits.sql`. Login por usuário requer chave privada do servidor e essa migration; ambos ainda dependem da liberação de acesso ao ambiente real. Sem configuração, o erro é explícito e o acesso legado permanece disponível. Consulte [ACESSO_E_PERSISTENCIA.md](docs/ACESSO_E_PERSISTENCIA.md) para ativação, segurança, arquivos e testes. Validação: **322/322 testes unitários/SQL e 85/85 cenários de navegador aprovados**, build, TypeScript, formatação e diff-check. Produção e banco remoto permanecem preservados.
+
 ## Modernização — 29/10/2026
 
 Esta etapa parte do commit `034a2b8`, preservando as melhorias anteriores. Corrige a comparação de limites em horas de relógio, separa horas noturnas computadas, confere repousos contínuos e semanas de transição sem aplicar um teto novo retroativamente. Regime comum e 12×36 continuam distintos; uma opção de cadastro não comprova compensação ou enquadramento excepcional.
@@ -88,7 +96,7 @@ Node.js 24 LTS e npm. O lockfile fixa as versões efetivamente instaladas.
 ```sh
 npm ci
 cp .env.example .env.local
-# Preencher as duas variáveis públicas do projeto Supabase.
+# Preencher as variáveis do projeto Supabase; login por usuário também requer a chave privada do servidor.
 npm run dev
 ```
 
@@ -146,7 +154,7 @@ Não habilite plano pago ou upgrades sem avaliar o custo. Vercel Hobby pode não
 
 ## Primeiro uso
 
-1. Crie sua conta, confirme o e-mail e entre.
+1. Cadastre usuário, senha e e-mail para recuperação; confirme o acesso e entre com usuário/senha. Contas existentes podem entrar por e-mail e definir o usuário em Meu acesso.
 2. Na área geral de **Parâmetros legais**, clique em **Importar referências** para incluir regras gerais e a biblioteca-base quando ainda não existirem. Confira fontes, valores e vigências; marque como conferido somente após revisão. Dentro de uma empresa, referências gerais são identificadas separadamente e a personalização cria um registro próprio.
 3. Em **Empresas**, cadastre nome, CNPJ válido, cidade/UF e CCT. Configure limite diário, autorização de 6x1 e banco de horas conforme o instrumento aplicável. Para 8h24, o limite correspondente é **8,4 horas decimais**; essa configuração exige fundamento.
 4. Em **Funcionários**, cadastre nome, cargo, contrato e descansos. O campo **CPF (opcional)** aceita 11 dígitos ou a máscara brasileira; deixe vazio quando não informado. Não use campos livres para esse dado.
