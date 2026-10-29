@@ -16,7 +16,7 @@ O acesso principal passa a usar **Usuário e Senha**, preservando o Supabase Aut
 
 Os dados salvos da conta permanecem no Supabase. A demonstração (`?demo=1`) continua fictícia e reinicia ao recarregar; agora oferece **Usar minha conta com dados salvos**. Corrigido o tratamento de gravação concluída com falha na recarga para evitar repetição de INSERT. Campos ainda em prévia continuam exigindo o salvamento indicado na tela.
 
-Nova migration: `20261029150540_username_login_and_attempt_limits.sql`. Login por usuário requer chave privada do servidor e essa migration; ambos ainda dependem da liberação de acesso ao ambiente real. Sem configuração, o erro é explícito e o acesso legado permanece disponível. Consulte [ACESSO_E_PERSISTENCIA.md](docs/ACESSO_E_PERSISTENCIA.md) para ativação, segurança, arquivos e testes. Validação: **322/322 testes unitários/SQL e 85/85 cenários de navegador aprovados**, build, TypeScript, formatação e diff-check. Produção e banco remoto permanecem preservados.
+Login por usuário e persistência estão configurados na Preview da branch `codex/usuario-senha-persistencia`, no projeto Supabase confirmado. As migrações foram aplicadas preservando as contas existentes; a chave privada fica somente no servidor da Preview. Contas anteriores entram por e-mail e definem seu usuário em **Meu acesso**. Consulte [ACESSO_E_PERSISTENCIA.md](docs/ACESSO_E_PERSISTENCIA.md) para ativação, segurança, arquivos e testes. Validação: **325/325 testes unitários/SQL aprovados**, além dos **85/85 cenários de navegador** da implementação, verificação remota da tela e teste transacional no banco real. Nenhuma versão foi publicada em produção.
 
 ## Modernização — 29/10/2026
 
