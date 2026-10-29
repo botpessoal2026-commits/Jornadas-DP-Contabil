@@ -4,11 +4,8 @@ import { Check, History, LockKeyhole, Send } from "lucide-react";
 import type { Data } from "@/lib/store";
 import { loadScheduleVersions } from "@/lib/store";
 import type { Schedule, ScheduleReview, ScheduleStatus } from "@/lib/types";
-import { evaluate } from "@/lib/engine";
-import { buildAlertSummary } from "@/lib/alerts";
-import { rulesForCompany } from "@/lib/company-resources";
+import { validateSchedule } from "@/lib/validation";
 import { projectData, employeeLocation } from "@/lib/special-dates";
-import { scheduleRegime } from "@/lib/work-regime";
 import {
   isScheduleLocked,
   reviewAttestation,
@@ -69,24 +66,9 @@ export default function ScheduleGovernance({
         error: "Empresa ou funcionário indisponível.",
       };
     try {
-      const result = evaluate(
-        schedule.dias,
-        rulesForCompany(data.rules, company.id),
-        company,
-        schedule.mes,
-        scheduleRegime(schedule, data.models),
-        employee,
-      );
-      const summary = buildAlertSummary(result.alerts, {
-        companyId: company.id,
-        companyName: company.nome,
-        employeeId: employee.id,
-        employeeName: employee.nome,
-        month: schedule.mes,
-      });
+      const { counts: reviewed } = validateSchedule(data, schedule);
       return {
-        violations: summary.counts.violations,
-        pendingSources: summary.counts.pendingSources,
+        ...reviewed,
         error: "",
       };
     } catch {
@@ -119,7 +101,7 @@ export default function ScheduleGovernance({
     }
     setWorking(true);
     try {
-      await onTransition(target, reason, reviewAttestation(counts));
+      await onTransition(target, reason, reviewAttestation(counts, checked));
       setReason("");
       setChecked(false);
       setVersions(null);
@@ -232,14 +214,22 @@ export default function ScheduleGovernance({
           ))}
         </div>
         {counts.error && <p className="warning-text mt-3">{counts.error}</p>}
+        <p className="muted mt-3">
+          {counts.violations} bloqueante(s) ·{" "}
+          {"attention" in counts ? counts.attention : 0} de atenção ·{" "}
+          {"informative" in counts ? counts.informative : 0} informativo(s) ·{" "}
+          {counts.pendingSources} fonte(s) pendente(s).
+        </p>
         {next && forwardError && (
           <p className="warning-text mt-3">{forwardError}</p>
         )}
         <label className="block mt-4">
           Justificativa{" "}
-          {reasonRequired
-            ? "para devolução ou reabertura (mínimo 10 caracteres)"
-            : "(opcional)"}
+          {"attention" in counts && (counts.attention ?? 0) > 0
+            ? "para conferência dos alertas de atenção (mínimo 10 caracteres)"
+            : reasonRequired
+              ? "para devolução ou reabertura (mínimo 10 caracteres)"
+              : "(opcional)"}
           <textarea
             value={reason}
             maxLength={2000}
@@ -253,8 +243,8 @@ export default function ScheduleGovernance({
               checked={checked}
               onChange={(event) => setChecked(event.target.checked)}
             />
-            Conferi os horários, as regras e os documentos aplicáveis. Não há
-            impedimentos ou fontes pendentes.
+            Conferi os horários, as regras, os documentos e os alertas de
+            atenção aplicáveis. Não há bloqueantes ou fontes pendentes.
           </label>
         )}
         <div className="actions mt-4">

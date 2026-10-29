@@ -1,4 +1,5 @@
 import Image from "next/image";
+import { brandAssets } from "@/lib/brand-assets";
 
 export default function Brand({
   light = false,
@@ -11,9 +12,7 @@ export default function Brand({
     <div className={`brand ${className}`}>
       <Image
         className="brand-logo"
-        src={
-          light ? "/brand/cont-contabil-light.svg" : "/brand/cont-contabil.svg"
-        }
+        src={light ? brandAssets.lightLogo : brandAssets.logo}
         alt="Cont Contábil"
         width={276}
         height={128}

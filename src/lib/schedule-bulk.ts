@@ -1,6 +1,7 @@
+import { validateScheduleInputs } from "./validation";
 import { buildAlertSummary } from "./alerts";
 import { rulesForCompany } from "./company-resources";
-import { evaluate, minutes, monthDates } from "./engine";
+import { minutes, monthDates } from "./engine";
 import { projectData } from "./special-dates";
 import { scheduleRegime } from "./work-regime";
 import type { Data } from "./store";
@@ -77,7 +78,7 @@ export function reviewBulkSchedules(
         throw new Error(
           "Empresa ou vínculo inativo; somente consulta permitida.",
         );
-      const result = evaluate(
+      const result = validateScheduleInputs(
         schedule.dias,
         rulesForCompany(projected.rules, company.id),
         company,
@@ -85,13 +86,7 @@ export function reviewBulkSchedules(
         scheduleRegime(schedule, projected.models),
         employee,
       );
-      const summary = buildAlertSummary(result.alerts, {
-        companyId: company.id,
-        companyName: company.nome,
-        employeeId: employee.id,
-        employeeName: employee.nome,
-        month: schedule.mes.slice(0, 7),
-      });
+      const summary = result.summary;
       return {
         ...base,
         violations: summary.counts.violations,

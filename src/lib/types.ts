@@ -179,6 +179,11 @@ export type ScheduleReview = {
   conferida: boolean;
   impedimentos: number;
   fontes_pendentes: number;
+  /** Optional so stored legacy attestations remain readable. */
+  politica_validacao?: "3-niveis-v1";
+  atencoes?: number;
+  informativos?: number;
+  atencoes_conferidas?: boolean;
 };
 export type Alert = {
   ruleId?: string;

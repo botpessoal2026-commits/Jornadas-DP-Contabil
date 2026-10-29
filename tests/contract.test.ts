@@ -76,7 +76,7 @@ test("texto de cadastro não é usado para presumir carga; legado exige revisão
   }
 });
 
-test("contrato considera horas reduzidas noturnas e virada de domingo para segunda", () => {
+test("contrato usa relógio na virada de domingo, com horas noturnas computadas separadas", () => {
   const d = demoData();
   const days = generateDays(
     "2026-12",
@@ -96,9 +96,20 @@ test("contrato considera horas reduzidas noturnas e virada de domingo para segun
     "turnos",
     employee,
   );
-  // Segunda contém 5h noturnas reduzidas + 1h diurna = 402,857 minutos.
+  // Segunda contém 360 minutos de relógio; o computado noturno é 402,857.
+  const week = result.weeks.find((entry) => entry.start === "2026-12-07")!;
+  assert.equal(week.total, 360);
+  assert.ok(week.computedTotal > 400);
   assert.ok(
-    result.alerts.some(
+    !result.alerts.some(
+      (a) => a.code === "contrato_semanal" && a.message.includes("2026-12-07"),
+    ),
+  );
+  assert.ok(
+    evaluate(days, d.rules, d.companies[0], "2026-12", "turnos", {
+      ...employee,
+      carga_semanal_minutos: 350,
+    }).alerts.some(
       (a) => a.code === "contrato_semanal" && a.message.includes("2026-12-07"),
     ),
   );

@@ -23,7 +23,12 @@ export type ScheduleVersion = {
   justificativa: string;
   snapshot: ScheduleSnapshot;
 };
-export type ReviewCounts = { violations: number; pendingSources: number };
+export type ReviewCounts = {
+  violations: number;
+  pendingSources: number;
+  attention?: number;
+  informative?: number;
+};
 
 export function scheduleStatus(schedule: Schedule): ScheduleStatus {
   return schedule.status ?? "rascunho";
@@ -42,9 +47,12 @@ export function transitionEligibility(
   reason = "",
 ): string | null {
   if (
-    ![review.violations, review.pendingSources].every(
-      (value) => Number.isInteger(value) && value >= 0,
-    )
+    ![
+      review.violations,
+      review.pendingSources,
+      review.attention ?? 0,
+      review.informative ?? 0,
+    ].every((value) => Number.isInteger(value) && value >= 0)
   )
     return "A conferência da escala está incompleta. Atualize os dados.";
   if (!schedule.id) return "Salve a escala antes de encaminhar para revisão.";
@@ -68,15 +76,24 @@ export function transitionEligibility(
       return "Resolva os impedimentos antes de aprovar, publicar ou fechar.";
     if (review.pendingSources > 0)
       return "Confira as fontes e regras pendentes antes de aprovar, publicar ou fechar.";
+    if ((review.attention ?? 0) > 0 && reason.trim().length < 10)
+      return "Registre a conferência dos alertas de atenção em uma justificativa de pelo menos 10 caracteres.";
   }
   return null;
 }
 
-export function reviewAttestation(review: ReviewCounts): ScheduleReview {
+export function reviewAttestation(
+  review: ReviewCounts,
+  attentionReviewed = false,
+): ScheduleReview {
   return {
     conferida: true,
     impedimentos: review.violations,
     fontes_pendentes: review.pendingSources,
+    politica_validacao: "3-niveis-v1",
+    atencoes: review.attention ?? 0,
+    informativos: review.informative ?? 0,
+    atencoes_conferidas: (review.attention ?? 0) === 0 || attentionReviewed,
   };
 }
 
@@ -157,7 +174,7 @@ export function applyDemoTransition(
       ? {
           conferido_por: actor,
           conferido_em: now,
-          conferencia: reviewAttestation(review),
+          conferencia: reviewAttestation(review, true),
         }
       : {}),
     ...(next === "rascunho"

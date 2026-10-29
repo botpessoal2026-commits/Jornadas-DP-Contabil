@@ -8,7 +8,26 @@ Aplicação em português para o Departamento Pessoal organizar empresas, funcio
 - Demonstração usa dados fictícios em memória e nunca acessa dados reais.
 - Sem variáveis do Supabase, login e gravação remota ficam indisponíveis; não existe fallback silencioso de dados reais para armazenamento local.
 - Criação do projeto Supabase, aplicação da migration no serviço e publicação Vercel dependem do acesso às respectivas contas. Nenhum projeto pago é criado pelo código.
-- A correção do 12×36 conferiu a CLT, art. 59-A, e a EC nº 141/2026 nas fontes oficiais. O validador específico observa as vigências de 16/12/2026 e 16/12/2027. Os antigos cenários demonstrativos de jornadas comuns continuam sendo fixtures ilustrativas, sem atualização automática de datas ou de regras cadastradas. Nenhum cadastro remoto foi alterado.
+- Regras e instrumentos não são certificados automaticamente. As referências legais são editáveis, têm vigência e fonte, e novas referências entram somente por importação explícita sem substituir cadastros.
+
+## Modernização — 29/10/2026
+
+Esta etapa parte do commit `034a2b8`, preservando as melhorias anteriores. Corrige a comparação de limites em horas de relógio, separa horas noturnas computadas, confere repousos contínuos e semanas de transição sem aplicar um teto novo retroativamente. Regime comum e 12×36 continuam distintos; uma opção de cadastro não comprova compensação ou enquadramento excepcional.
+
+As referências atuais incluem 42h e dois repousos em 16/12/2026 e 40h em 16/12/2027. A demonstração utiliza essas datas oficiais. Os parâmetros reais existentes continuam preservados e as novas referências permanecem pendentes de conferência. A [nota de fontes jurídicas](docs/ATUALIZACAO_LEGAL.md) registra o texto consultado no Senado e na Câmara, as datas e os limites de interpretação.
+
+A conferência central usa **Bloqueante, Atenção e Informativo** na interface, relatórios e aprovação. Trabalho noturno isolado é informativo; fontes ou condições jurídicas pendentes continuam impedindo aprovação. Alertas de atenção exigem conferência e justificativa. O banco reforça proprietário, revisão, fluxo e atestação; não reexecuta o motor TypeScript nem certifica juridicamente a escala.
+
+O simulador no cadastro de modelos distribui uma carga semanal exata em minutos inteiros, mostra comparação antes/depois e considera início, pausa, dias selecionados e turnos noturnos. Aplicar a proposta altera os campos do modelo, com salvamento explícito; gerar a escala mensal individual ou em lote continua submetido ao motor. A navegação por áreas pode ser recolhida no desktop e mantém acesso por teclado no celular. Tema e identidade visual existentes foram preservados.
+
+A logomarca pode ser configurada no build pelas variáveis opcionais de `.env.example`, usando arquivos fornecidos em `public/brand` (SVG, PNG ou WebP). Os SVGs existentes são o padrão; não há upload remoto ou logomarca separada por empresa nesta etapa.
+
+A migration incremental `20261029123937_three_level_review_attestation.sql` foi preparada para o fluxo de atestação. Aplique a sequência de migrations e homologue em ambiente de teste antes de utilizar as novas aprovações com contas reais. Nenhum banco remoto ou deployment foi alterado nesta modernização.
+
+Validação desta modernização: **297 testes unitários/SQL aprovados e 78 cenários de navegador validados**, com 14 cenários afetados aprovados na reexecução final após atualizar seletores/expectativas. Build, TypeScript, Prettier e diff-check aprovados. Auditoria de dependências de produção: zero vulnerabilidades reportadas. Desktop/mobile, temas e demonstração inspecionados sem erros JavaScript ou transbordamento horizontal.
+
+Escopo, arquivos, execução detalhada e pendências: [docs/MODERNIZACAO.md](docs/MODERNIZACAO.md).
+
 
 ## Melhorias da revisão — 29/10/2026
 
@@ -137,7 +156,7 @@ Não habilite plano pago ou upgrades sem avaliar o custo. Vercel Hobby pode não
 
 Os descansos do cadastro do funcionário são contratuais. O modelo escolhido determina o calendário gerado; divergências precisam ser conferidas. Banco de horas é uma permissão cadastrada, não um módulo de saldo/compensação.
 
-## Motor e critérios de cálculo
+## Motor e critérios de cálculo — registro da primeira etapa
 
 `src/lib/engine.ts` recebe os parâmetros do banco; não importa valores legais dos cadastros iniciais. `src/lib/presets.ts` contém apenas sugestões editáveis para primeiro cadastro e exemplos da demonstração. Grupos: regime, intervalo, interjornada, noturno e divisor. A regra de cada grupo com vigência mais recente, não posterior à data analisada, é usada. Regras não conferidas participam da simulação e sempre geram aviso com fonte; a aplicação não as certifica.
 

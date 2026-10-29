@@ -1,6 +1,7 @@
+import { validateScheduleInputs } from "./validation";
 import type { Data } from "./store";
 import type { Company, Employee } from "./types";
-import { evaluate } from "./engine";
+
 import { rulesForCompany } from "./company-resources";
 import { buildAlertSummary } from "./alerts";
 import { scheduleRegime } from "./work-regime";
@@ -121,7 +122,7 @@ export function buildWorkQueue(data: Data, month: string): WorkQueueItem[] {
       continue;
     }
     try {
-      const report = evaluate(
+      const report = validateScheduleInputs(
         schedule.dias,
         rules.get(company.id)!,
         company,
@@ -129,13 +130,7 @@ export function buildWorkQueue(data: Data, month: string): WorkQueueItem[] {
         scheduleRegime(schedule, data.models),
         employee,
       );
-      const summary = buildAlertSummary(report.alerts, {
-        companyId: company.id,
-        companyName: company.nome,
-        employeeId: employee.id,
-        employeeName: employee.nome,
-        month,
-      });
+      const summary = report.summary;
       if (summary.counts.violations)
         add(
           "impedimento",

@@ -32,14 +32,31 @@ async function user(db: PGlite, id = ids.owner) {
   await db.exec("set role authenticated");
   await db.query("select set_config('request.jwt.claim.sub',$1,false)", [id]);
 }
-async function setup() {
+const threeLevelMigration = "20261029123937_three_level_review_attestation.sql";
+const legacyAttestation = {
+  conferida: true,
+  impedimentos: 0,
+  fontes_pendentes: 0,
+};
+const currentAttestation = {
+  ...legacyAttestation,
+  politica_validacao: "3-niveis-v1",
+  atencoes: 0,
+  informativos: 0,
+  atencoes_conferidas: true,
+};
+async function setup(beforeThreeLevels = false) {
   const db = new PGlite();
   await db.exec(`create role anon; create role authenticated; create schema auth; create table auth.users(id uuid primary key);
     create function auth.uid() returns uuid language sql stable as $$ select nullif(current_setting('request.jwt.claim.sub',true),'')::uuid $$;
     alter default privileges in schema public grant all on tables to anon,authenticated;
     grant usage on schema auth,public to authenticated,anon; grant execute on function auth.uid() to authenticated,anon;`);
   for (const file of (await readdir("supabase/migrations"))
-    .filter((name) => name.endsWith(".sql"))
+    .filter(
+      (name) =>
+        name.endsWith(".sql") &&
+        (!beforeThreeLevels || name < threeLevelMigration),
+    )
     .sort())
     await db.exec(await readFile(`supabase/migrations/${file}`, "utf8"));
   await db.query("insert into auth.users values($1),($2)", [
@@ -74,11 +91,7 @@ async function transition(
   db: PGlite,
   status: string,
   reason = "Conferência do responsável",
-  attestation: Record<string, unknown> = {
-    conferida: true,
-    impedimentos: 0,
-    fontes_pendentes: 0,
-  },
+  attestation: Record<string, unknown> = currentAttestation,
 ) {
   const row = await current(db);
   await db.query(
@@ -93,6 +106,168 @@ async function transition(
     ],
   );
 }
+
+test("atestação dos três níveis exige conferência e justificativa no banco, sem bloquear informativos", async () => {
+  const db = await setup();
+  try {
+    await save(db, [item()]);
+    await transition(db, "em_revisao");
+    await assert.rejects(
+      transition(
+        db,
+        "aprovada",
+        "Cliente antigo sem política",
+        legacyAttestation,
+      ),
+      /níveis de alerta está incompleta/,
+    );
+    await assert.rejects(
+      db.query(
+        "update public.escalas set status='aprovada',conferencia=$1::jsonb where id=$2",
+        [JSON.stringify(legacyAttestation), (await current(db)).id],
+      ),
+      /níveis de alerta está incompleta/,
+    );
+    const reviewed = {
+      conferida: true,
+      impedimentos: 0,
+      fontes_pendentes: 0,
+      politica_validacao: "3-niveis-v1",
+      atencoes: 1,
+      informativos: 3,
+      atencoes_conferidas: true,
+    };
+    await assert.rejects(
+      transition(db, "aprovada", "Curta", reviewed),
+      /justificativa/,
+    );
+    await assert.rejects(
+      db.query(
+        "update public.escalas set status='aprovada',ultima_justificativa=null,conferencia=$1::jsonb where id=$2",
+        [JSON.stringify(reviewed), (await current(db)).id],
+      ),
+      /justificativa/,
+    );
+    await assert.rejects(
+      transition(db, "aprovada", "Conferência registrada", {
+        ...reviewed,
+        atencoes_conferidas: false,
+      }),
+      /alertas de atenção/,
+    );
+    await assert.rejects(
+      transition(db, "aprovada", "Conferência registrada", {
+        ...reviewed,
+        atencoes: 0.5,
+      }),
+      /Contagem/,
+    );
+    await assert.rejects(
+      transition(db, "aprovada", "Conferência registrada", {
+        ...reviewed,
+        informativos: "3",
+      }),
+      /incompleta/,
+    );
+    await transition(
+      db,
+      "aprovada",
+      "Exceção conferida com documento",
+      reviewed,
+    );
+    // Even a direct status UPDATE cannot drop the new attestation policy.
+    await assert.rejects(
+      transition(db, "publicada", "Tentativa sem política", legacyAttestation),
+      /incompleta/,
+    );
+    await transition(
+      db,
+      "publicada",
+      "Versão conferida para publicação",
+      reviewed,
+    );
+    await transition(
+      db,
+      "rascunho",
+      "Reabertura para novo planejamento",
+      reviewed,
+    );
+    await transition(db, "em_revisao");
+    await transition(db, "aprovada", "", {
+      ...reviewed,
+      atencoes: 0,
+      informativos: 4,
+    });
+    assert.equal((await current(db)).status, "aprovada");
+  } finally {
+    await db.close();
+  }
+});
+
+test("aprovação histórica permanece publicável, mas reaprovação após migração exige nova política", async () => {
+  const db = await setup(true);
+  try {
+    await save(db, [item()]);
+    await transition(db, "em_revisao", "", legacyAttestation);
+    await transition(
+      db,
+      "aprovada",
+      "Aprovação anterior à atualização",
+      legacyAttestation,
+    );
+    await db.exec("reset role");
+    await db.exec(
+      await readFile(`supabase/migrations/${threeLevelMigration}`, "utf8"),
+    );
+    await user(db);
+    const before = (
+      await db.query<{ conferencia: unknown }>(
+        "select conferencia from public.escalas",
+      )
+    ).rows[0].conferencia;
+    assert.deepEqual(before, legacyAttestation);
+    await transition(
+      db,
+      "publicada",
+      "Publicação de aprovação histórica",
+      legacyAttestation,
+    );
+    await transition(
+      db,
+      "fechada",
+      "Fechamento de aprovação histórica",
+      legacyAttestation,
+    );
+    assert.deepEqual(
+      (
+        await db.query<{ conferencia: unknown }>(
+          "select conferencia from public.escalas",
+        )
+      ).rows[0].conferencia,
+      legacyAttestation,
+    );
+    await transition(
+      db,
+      "rascunho",
+      "Reabertura para nova aprovação",
+      legacyAttestation,
+    );
+    await transition(db, "em_revisao", "", legacyAttestation);
+    await assert.rejects(
+      transition(
+        db,
+        "aprovada",
+        "Tentativa de política antiga",
+        legacyAttestation,
+      ),
+      /incompleta/,
+    );
+    await transition(db, "aprovada");
+    assert.equal((await current(db)).status, "aprovada");
+  } finally {
+    await db.close();
+  }
+});
 
 test("gravação compara revisão, detecta corrida de criação e mantém lote atômico", async () => {
   const db = await setup();
@@ -163,7 +338,7 @@ test("fluxo exige conferência, bloqueia edições diretas e congela versões se
     await transition(db, "em_revisao");
     await assert.rejects(
       transition(db, "aprovada", "", {
-        conferida: true,
+        ...currentAttestation,
         impedimentos: 1,
         fontes_pendentes: 0,
       }),
@@ -171,7 +346,7 @@ test("fluxo exige conferência, bloqueia edições diretas e congela versões se
     );
     await assert.rejects(
       transition(db, "aprovada", "", {
-        conferida: true,
+        ...currentAttestation,
         impedimentos: 0,
         fontes_pendentes: 1,
       }),

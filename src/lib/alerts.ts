@@ -1,6 +1,12 @@
 import type { Alert } from "./types";
+import {
+  classificationForAlert,
+  isPendingSource,
+  type AlertClassification,
+} from "./validation-policy";
 
-export type AlertCategory = "violation" | "attention" | "pending_source";
+export type AlertCategory =
+  "violation" | "attention" | "informative" | "pending_source";
 export type AlertPeriod = { start: string; end: string };
 export type AlertContext = {
   companyId: string;
@@ -18,6 +24,7 @@ export type AlertOccurrence = {
 export type AlertGroup = AlertContext & {
   id: string;
   category: AlertCategory;
+  classification: AlertClassification;
   code: string;
   title: string;
   message: string;
@@ -36,6 +43,7 @@ export type AlertSummary = {
   groups: AlertGroup[];
   violations: AlertGroup[];
   attention: AlertGroup[];
+  informative: AlertGroup[];
   pendingSources: AlertGroup[];
   /** Counts distinct issues; repeated occurrences have their own counters. */
   counts: { violations: number; attention: number; pendingSources: number };
@@ -65,6 +73,7 @@ const titles: Record<string, string> = {
   intrajornada: "Intervalo intrajornada insuficiente",
   interjornada: "Descanso entre jornadas insuficiente",
   descanso: "Descanso semanal insuficiente",
+  descanso_consecutivo: "Trabalho consecutivo sem repouso suficiente",
   sobreposicao: "Horários sobrepostos",
   sobreposicao_civil: "Horários sobrepostos entre dias",
   "6x1": "Modelo 6×1 sem autorização da empresa",
@@ -85,6 +94,8 @@ const titles: Record<string, string> = {
   sem_intervalo_12x36: "Tratamento do intervalo 12×36 pendente",
   sem_transicao_12x36: "Conferência do ciclo na transição de vigência",
   sem_ancora_12x36: "Referência do ciclo precisa de conferência",
+  sem_compensacao_diaria: "Fundamento para ampliação diária pendente",
+  sem_contexto_descanso: "Faltam dias para conferir o repouso consecutivo",
   transicao: "Semana com transição de regra",
   semana_incompleta: "Faltam dias para conferir a semana",
   pendente: "Fonte da regra precisa de conferência",
@@ -93,6 +104,7 @@ const priority: Record<AlertCategory, number> = {
   violation: 0,
   attention: 1,
   pending_source: 2,
+  informative: 3,
 };
 
 function validDate(value: string) {
@@ -115,10 +127,13 @@ export function periodForAlert(alert: Pick<Alert, "code" | "date" | "period">) {
 export function classifyAlert(
   alert: Pick<Alert, "code" | "severity">,
 ): AlertCategory {
-  if (alert.code === "pendente" || alert.code.startsWith("sem_"))
-    return "pending_source";
-  if (alert.code === "contrato_pendente") return "attention";
-  return alert.severity === "erro" ? "violation" : "attention";
+  if (isPendingSource(alert)) return "pending_source";
+  const classification = classificationForAlert(alert);
+  return classification === "bloqueante"
+    ? "violation"
+    : classification === "informativo"
+      ? "informative"
+      : "attention";
 }
 
 /** Deterministic identifier, independent of array order or React rendering. */
@@ -175,6 +190,7 @@ export function buildAlertSummary(
         ...context,
         id: `alert-${stableId(key)}`,
         category,
+        classification: classificationForAlert(alert),
         code: alert.code,
         title:
           titles[alert.code] ??
@@ -192,13 +208,15 @@ export function buildAlertSummary(
         occurrences: [],
         action,
         suggestedAction:
-          action === "rules"
-            ? "Conferir a fonte, os valores e a vigência nos parâmetros legais."
-            : action === "employee"
-              ? "Revisar a carga semanal estruturada no cadastro do funcionário."
-              : action === "period"
-                ? "Revisar os turnos e descansos no período indicado."
-                : "Abrir o dia e revisar os horários ou a regra aplicável.",
+          category === "informative"
+            ? "Consultar a faixa noturna e os totais de relógio e computados. Esta informação, isoladamente, não indica excesso."
+            : action === "rules"
+              ? "Conferir a fonte, os valores e a vigência nos parâmetros legais."
+              : action === "employee"
+                ? "Revisar a carga semanal estruturada no cadastro do funcionário."
+                : action === "period"
+                  ? "Revisar os turnos e descansos no período indicado."
+                  : "Abrir o dia e revisar os horários ou a regra aplicável.",
       };
       grouped.set(key, group);
     }
@@ -231,6 +249,9 @@ export function buildAlertSummary(
   );
   const violations = groups.filter((group) => group.category === "violation");
   const attention = groups.filter((group) => group.category === "attention");
+  const informative = groups.filter(
+    (group) => group.category === "informative",
+  );
   const pendingSources = groups.filter(
     (group) => group.category === "pending_source",
   );
@@ -240,6 +261,7 @@ export function buildAlertSummary(
     groups,
     violations,
     attention,
+    informative,
     pendingSources,
     counts: {
       violations: violations.length,
@@ -263,6 +285,7 @@ export function alertsForDate(
     (group) =>
       group.action !== "rules" &&
       group.action !== "employee" &&
+      group.category !== "informative" &&
       group.occurrences.some((occurrence) =>
         occurrence.period
           ? occurrence.period.start <= date && occurrence.period.end >= date

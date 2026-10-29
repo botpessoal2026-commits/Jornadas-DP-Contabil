@@ -39,13 +39,15 @@ test("violações são prioritárias; ausência de configuração não infla con
   );
   assert.deepEqual(summary.counts, {
     violations: 1,
-    attention: 1,
+    attention: 0,
     pendingSources: 2,
   });
   assert.deepEqual(
     summary.groups.map((group) => group.category),
-    ["violation", "attention", "pending_source", "pending_source"],
+    ["violation", "pending_source", "pending_source", "informative"],
   );
+  assert.equal(summary.informative.length, 1);
+  assert.equal(summary.informative[0].classification, "informativo");
   assert.equal(
     classifyAlert(issue({ code: "contrato_pendente" })),
     "attention",

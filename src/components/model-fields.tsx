@@ -5,6 +5,7 @@ import { formatMinutes, span } from "@/lib/engine";
 import { shiftEditorText, validateShiftText } from "@/lib/shift-editor";
 import type { Company, Model } from "@/lib/types";
 import ShiftVisualEditor from "./shift-visual-editor";
+import ScheduleSimulator from "./schedule-simulator";
 
 const days = [
   "Domingo",
@@ -200,6 +201,18 @@ export default function ModelFields({
               Copiar segunda para dias úteis
             </button>
           </div>
+          <ScheduleSimulator
+            currentPattern={Object.fromEntries(
+              validation.map((day, index) => [String(index), day.shifts ?? []]),
+            )}
+            onApply={(pattern) =>
+              setWeek(
+                days.map((_, day) =>
+                  shiftEditorText(pattern[String(day)] ?? []),
+                ),
+              )
+            }
+          />
           <div className="week-editor span2">
             {days.map((name, day) => {
               const error = validation[day].errors.intervals;

@@ -1,6 +1,7 @@
+import { validateScheduleInputs } from "./validation";
 import { buildAlertSummary } from "./alerts";
 import { scheduleRegime } from "./work-regime";
-import { evaluate, holidayAt } from "./engine";
+import { holidayAt } from "./engine";
 import {
   holidaysForCompany,
   modelsForCompany,
@@ -192,7 +193,7 @@ export function companySummary(data: Data, company: Company, month: string) {
       (entry) => entry.id === schedule.funcionario_id,
     );
     try {
-      const report = evaluate(
+      const report = validateScheduleInputs(
         schedule.dias,
         scoped.rules,
         company,

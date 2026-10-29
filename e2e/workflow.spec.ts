@@ -70,7 +70,7 @@ test("demonstração: calendário, edições, exportações, duplicação e cada
   ).toBeVisible();
   const proposed = page.locator(".legal-card").filter({
     has: page.getByRole("heading", {
-      name: "Proposta 42h / 5x2 — conferir vigência",
+      name: "Regime de referência — 42h / dois repousos",
       exact: true,
     }),
   });

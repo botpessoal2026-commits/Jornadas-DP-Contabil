@@ -1,7 +1,14 @@
 "use client";
 import { useId, useState } from "react";
-import { AlertTriangle, BookOpen, Check, ChevronRight } from "lucide-react";
+import {
+  AlertTriangle,
+  BookOpen,
+  Check,
+  ChevronRight,
+  Info,
+} from "lucide-react";
 import type { AlertGroup, AlertOccurrence, AlertSummary } from "@/lib/alerts";
+import { classificationLabels } from "@/lib/validation-policy";
 
 function dateLabel(value: string) {
   const [year, month, day] = value.split("-");
@@ -38,7 +45,9 @@ function Group({
       ? `Conferir regra: ${group.rule}`
       : group.action === "employee"
         ? "Revisar contrato do funcionário"
-        : `Resolver: ${group.title}`;
+        : group.classification === "informativo"
+          ? `Ver dia: ${group.title}`
+          : `Resolver: ${group.title}`;
   return (
     <article
       className={`alert-group ${group.category.replace("_", "-")}`}
@@ -48,6 +57,9 @@ function Group({
     >
       <div className="alert-group-heading">
         <h4>{group.title}</h4>
+        <span className="pill neutral">
+          {classificationLabels[group.classification]}
+        </span>
         <span className="alert-count">
           {group.count} {group.count === 1 ? "ocorrência" : "ocorrências"}
         </span>
@@ -129,8 +141,9 @@ export default function ScheduleAlerts(props: Props) {
       {problems.length > 0 && (
         <div className="alert-overview" aria-label="Resumo das ocorrências">
           <span>
-            <strong>{summary.counts.violations}</strong> impedimento(s) ·{" "}
-            <strong>{summary.counts.attention}</strong> aviso(s) ·{" "}
+            <strong>{summary.counts.violations}</strong> bloqueante(s) ·{" "}
+            <strong>{summary.counts.attention}</strong> de atenção ·{" "}
+            <strong>{summary.informative.length}</strong> informativo(s) ·{" "}
             <strong>{summary.counts.pendingSources}</strong> pendência(s) de
             fonte
           </span>
@@ -154,7 +167,7 @@ export default function ScheduleAlerts(props: Props) {
           <div className="alert-section-heading">
             <h3 id={`${headingId}-violations`}>
               <AlertTriangle size={19} aria-hidden="true" />
-              Violações impeditivas
+              Bloqueantes
             </h3>
             <p>
               {countLabel(
@@ -181,7 +194,7 @@ export default function ScheduleAlerts(props: Props) {
           <div className="alert-section-heading">
             <h3 id={`${headingId}-attention`}>
               <AlertTriangle size={19} aria-hidden="true" />
-              Alertas de atenção
+              Atenção
             </h3>
             <p>
               {countLabel(
@@ -199,6 +212,34 @@ export default function ScheduleAlerts(props: Props) {
           <Check size={17} className="alert-clear-icon" aria-hidden="true" />
           Sem alertas de atenção
         </p>
+      )}
+      {summary.informative.length > 0 && (
+        <details
+          className="alert-section informative"
+          data-testid="informative-alerts"
+        >
+          <summary className="alert-section-heading">
+            <span className="alert-section-title">
+              <Info size={19} aria-hidden="true" /> Informativos
+            </span>
+            <span>
+              {countLabel(
+                summary.informative.length,
+                summary.informative.reduce(
+                  (total, group) => total + group.count,
+                  0,
+                ),
+              )}
+            </span>
+          </summary>
+          <p className="alert-empty">
+            Informações de planejamento que, por si só, não representam
+            irregularidade.
+          </p>
+          {summary.informative.map((group) => (
+            <Group key={group.id} {...props} group={group} />
+          ))}
+        </details>
       )}
       <details
         className="alert-section pending-source"

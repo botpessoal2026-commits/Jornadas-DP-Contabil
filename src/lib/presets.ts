@@ -1,8 +1,10 @@
 import type { LegalRule, Model, WeekPattern, Holiday } from "./types";
 import { default12x36Values } from "./work-regime";
+import {
+  commonTransitionReferences,
+  constitutionalReference,
+} from "./legal-reference";
 // Dados de cadastro editáveis. O motor não importa este arquivo: só consome linhas do banco.
-const proposed =
-  "Cenário demonstrativo histórico, com data ilustrativa preservada. Consulte a EC nº 141/2026 e o instrumento aplicável; este exemplo não comprova enquadramento jurídico.";
 export const initialRules: Omit<LegalRule, "id">[] = [
   {
     nome: "Regime de referência — 44h",
@@ -82,46 +84,33 @@ export const initialRules: Omit<LegalRule, "id">[] = [
       "Referência para conferência. Registre o acordo individual escrito, CCT ou ACT e sua comprovação. Adeque a média e os repousos às vigências de 16/12/2026 e 16/12/2027; esta referência não comprova o instrumento aplicável.",
     confirmado: false,
   },
-];
-// Hipóteses visuais e fixtures de teste; nunca importadas para o banco real.
-export const demonstrationRules: Omit<LegalRule, "id">[] = [
-  {
-    nome: "Proposta 42h / 5x2 — conferir vigência",
-    chave: "regime",
+  ...commonTransitionReferences,
+  ...commonTransitionReferences.map((reference) => ({
+    ...reference,
+    nome: `Regime 12×36 — referência ${Number(reference.valor.limite_semanal_minutos) / 60}h / dois repousos`,
     valor: {
-      limite_semanal_minutos: 2520,
-      limite_diario_minutos: 480,
-      permite_limite_empresa: true,
+      ...default12x36Values,
+      limite_media_semanal_minutos: Number(
+        reference.valor.limite_semanal_minutos,
+      ),
       descansos_semanais: 2,
-      preferir_domingo: true,
+      fonte_versao: constitutionalReference.version,
+      fonte_consultada_em: constitutionalReference.reviewedAt,
+      escopo: "referencia_geral",
     },
-    inicio_vigencia: "2026-12-15",
-    fonte:
-      "Exemplo histórico do solicitante; conferir EC nº 141/2026 — https://www.planalto.gov.br/ccivil_03/constituicao/emendas/emc/emc141.htm",
+    fonte: `CLT, art. 59-A — https://www2.camara.leg.br/legin/fed/declei/1940-1949/decreto-lei-5452-1-maio-1943-415500-normaatualizada-pe.html; ${reference.fonte}`,
     observacao:
-      proposed +
-      " O exemplo mantém 15/12; a vigência oficial é 16/12/2026. 8h24 exige configuração e instrumento compatíveis.",
-    confirmado: false,
-  },
-  {
-    nome: "Proposta 40h / 5x2 — data estimada",
-    chave: "regime",
-    valor: {
-      limite_semanal_minutos: 2400,
-      limite_diario_minutos: 480,
-      permite_limite_empresa: false,
-      descansos_semanais: 2,
-      preferir_domingo: true,
-    },
-    inicio_vigencia: "2027-12-01",
-    fonte:
-      "Exemplo histórico do solicitante; conferir EC nº 141/2026 — https://www.planalto.gov.br/ccivil_03/constituicao/emendas/emc/emc141.htm",
-    observacao:
-      proposed +
-      " O exemplo mantém 01/12/2027; a vigência oficial de 40h é 16/12/2027.",
-    confirmado: false,
-  },
+      "Comprove o acordo individual escrito, CCT ou ACT do plantão. O fundamento do 12×36 não comprova dispensa dos limites constitucionais. Para compensar os dois repousos na média mensal, o art. 7º, § 2º, da CF exige CCT/ACT aplicável e conferido. " +
+      constitutionalReference.salaryReference,
+  })),
 ];
+// Compatibilidade de importação: exemplos atuais, sem conferência do vínculo.
+export const demonstrationRules: Omit<LegalRule, "id">[] =
+  commonTransitionReferences.map((rule) => ({
+    ...structuredClone(rule),
+    nome: `Demonstração — ${Number(rule.valor.limite_semanal_minutos) / 60}h / conferir enquadramento`,
+    confirmado: false,
+  }));
 const standard: WeekPattern = Object.fromEntries(
   [1, 2, 3, 4, 5].map((d) => [
     String(d),

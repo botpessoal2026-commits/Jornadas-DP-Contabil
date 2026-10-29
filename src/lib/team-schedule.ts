@@ -1,16 +1,11 @@
+import { validateScheduleInputs } from "./validation";
 import type { Data } from "./store";
 import type { Company, Employee, Schedule } from "./types";
 import { alertsForDate, buildAlertSummary } from "./alerts";
 import { rulesForCompany } from "./company-resources";
 import { scheduleRegime } from "./work-regime";
 import { projectData, dayPresentation } from "./special-dates";
-import {
-  computeDay,
-  evaluate,
-  formatMinutes,
-  monthDates,
-  span,
-} from "./engine";
+import { computeDay, formatMinutes, monthDates, span } from "./engine";
 
 export type TeamDay = {
   date: string;
@@ -122,7 +117,7 @@ export function teamScheduleRows(
       let reviewIncomplete = false;
       if (schedule) {
         try {
-          const report = evaluate(
+          const report = validateScheduleInputs(
             schedule.dias,
             rules,
             company,
@@ -130,13 +125,7 @@ export function teamScheduleRows(
             scheduleRegime(schedule, data.models),
             employee,
           );
-          groups = buildAlertSummary(report.alerts, {
-            companyId: company.id,
-            companyName: company.nome,
-            employeeId: employee.id,
-            employeeName: employee.nome,
-            month,
-          }).groups;
+          groups = report.summary.groups;
         } catch {
           // Invalid legacy shifts are shown for review instead of dropping the row.
           reviewIncomplete = true;
