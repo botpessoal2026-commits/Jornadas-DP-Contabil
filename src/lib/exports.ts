@@ -1,5 +1,7 @@
 import type { Company, Employee, LegalRule, Schedule } from "./types";
-import { computeDay, evaluate, formatMinutes, span } from "./engine";
+import { computeDay, formatMinutes, span } from "./engine";
+import { validateScheduleInputs } from "./validation";
+import { classificationLabel } from "./validation-policy";
 import { rulesForCompany } from "./company-resources";
 import { dayPresentation, specialDateTotals } from "./special-dates";
 import { scheduleStatusLabels } from "./schedule-governance";
@@ -153,7 +155,7 @@ export async function excelBuffer(
   sheet.getRow(1).font = { bold: true };
   sheet.views = [{ state: "frozen", ySplit: 1 }];
   const summary = book.addWorksheet("Resumo e alertas");
-  const result = evaluate(
+  const result = validateScheduleInputs(
     s.dias,
     rules,
     company,
@@ -181,9 +183,15 @@ export async function excelBuffer(
       p.divisor ?? "Ausente",
       p.rule?.fonte ?? "",
     ]);
-  summary.addRow(["Data", "Alerta", "Regra", "Fonte"]);
+  summary.addRow(["Data", "Classificação", "Alerta", "Regra", "Fonte"]);
   result.alerts.forEach((a) =>
-    summary.addRow([a.date, a.message, a.rule, a.source]),
+    summary.addRow([
+      a.date,
+      classificationLabel(a),
+      a.message,
+      a.rule,
+      a.source,
+    ]),
   );
   summary.columns.forEach((c) => (c.width = 40));
   return book.xlsx.writeBuffer();
@@ -216,7 +224,7 @@ export async function pdfDocument(
     title: `Escala - ${company.nome} - ${employee?.nome ?? s.nome_funcionario ?? ""} - ${s.mes.slice(0, 7)}`,
     creator: "Cont Contábil · Gerador de Jornadas",
   });
-  const result = evaluate(
+  const result = validateScheduleInputs(
     s.dias,
     rules,
     company,
@@ -266,7 +274,7 @@ export async function pdfDocument(
       summaryY,
     );
     const note = result.alerts.length
-      ? `${result.alerts.length} alerta(s) na conferência. Consulte o relatório completo antes de aprovar.`
+      ? `${result.reviewCounts.violations} bloqueante(s) | ${result.reviewCounts.attention} atenção | ${result.reviewCounts.informative} informativo(s) | ${result.reviewCounts.pendingSources} fonte(s) pendente(s). Consulte a conferência completa.`
       : "Sem alertas nos parâmetros cadastrados. Consulte a conferência completa.";
     doc.text(doc.splitTextToSize(note, 182), 14, summaryY + 5);
     for (let page = 1; page <= doc.getNumberOfPages(); page++) {
@@ -333,10 +341,15 @@ export async function pdfDocument(
   doc.text("Conferência de regras e alertas", 14, 18);
   autoTable(doc, {
     startY: 25,
-    head: [["Data", "Alerta", "Regra e fonte"]],
+    head: [["Data", "Classificação", "Alerta", "Regra e fonte"]],
     body: result.alerts.length
-      ? result.alerts.map((a) => [a.date, a.message, `${a.rule} — ${a.source}`])
-      : [["", "Sem alertas nos parâmetros cadastrados", ""]],
+      ? result.alerts.map((a) => [
+          a.date,
+          classificationLabel(a),
+          a.message,
+          `${a.rule} — ${a.source}`,
+        ])
+      : [["", "", "Sem alertas nos parâmetros cadastrados", ""]],
     styles: { fontSize: 7 },
   });
   doc.addPage();

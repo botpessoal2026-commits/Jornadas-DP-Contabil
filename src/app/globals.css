@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@import "./modernization.css";
 
 /* Date natures use soft fills; existing alert borders remain independent. */
 .calendar .day[data-day-kind="feriado"],

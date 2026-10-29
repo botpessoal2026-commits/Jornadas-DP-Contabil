@@ -5,11 +5,11 @@ import {
   clock,
   computeDay,
   dateUTC,
-  evaluate,
   monthDates,
   span,
 } from "./engine";
 import { classifyAlert } from "./alerts";
+import { validateScheduleInputs as evaluate } from "./validation";
 import { projectData } from "./special-dates";
 import { scheduleRegime } from "./work-regime";
 import { validateShiftText } from "./shift-editor";
@@ -525,7 +525,9 @@ export function assessSwap(
     issues,
     canApply:
       !issues.length &&
-      !alerts.some((alert) => classifyAlert(alert) !== "attention"),
+      !alerts.some((alert) =>
+        ["violation", "pending_source"].includes(classifyAlert(alert)),
+      ),
   };
 }
 

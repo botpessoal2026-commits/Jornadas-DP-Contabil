@@ -216,6 +216,70 @@ export default function LegalFields({
             </label>
           ),
         )}
+        {group === "regime" && !isCycle && (
+          <>
+            <label className="span2">
+              Fundamento da compensação diária
+              <select
+                value={String(values.fundamento_tipo ?? "")}
+                onChange={(event) =>
+                  setValue("fundamento_tipo", event.target.value)
+                }
+              >
+                <option value="">Pendente de comprovação</option>
+                <option value="acordo_individual">
+                  Acordo individual escrito
+                </option>
+                <option value="acordo_tacito_mensal">
+                  Acordo tácito no mesmo mês
+                </option>
+                <option value="cct">Convenção coletiva de trabalho</option>
+                <option value="act">Acordo coletivo de trabalho</option>
+              </select>
+            </label>
+            <label className="span2">
+              Referência da compensação aplicável
+              <input
+                value={String(values.fundamento_referencia ?? "")}
+                onChange={(event) =>
+                  setValue("fundamento_referencia", event.target.value)
+                }
+                placeholder="Instrumento, cláusula, vínculos e vigência"
+              />
+            </label>
+            <label>
+              Período de compensação
+              <select
+                value={String(values.periodo_compensacao ?? "")}
+                onChange={(event) =>
+                  setValue("periodo_compensacao", event.target.value)
+                }
+              >
+                <option value="">Pendente de definição</option>
+                <option value="mes">Mesmo mês</option>
+                <option value="seis_meses">Até seis meses</option>
+                <option value="ano">Até um ano</option>
+              </select>
+            </label>
+            <label className="check-label">
+              <input
+                type="checkbox"
+                checked={values.comprovado === true}
+                onChange={(event) =>
+                  setValue("comprovado", event.target.checked)
+                }
+              />
+              Compensação conferida e aplicável a estes vínculos
+            </label>
+            <p className="warning-text span2">
+              Marcar a opção da empresa não comprova compensação. Na transição
+              de 16/12/2026 a 15/12/2027, a ampliação diária do art. 7º da EC nº
+              141/2026 depende de CCT ou ACT. Nos demais períodos, confira os
+              requisitos e prazos do art. 59 da CLT. Este cadastro não apura
+              saldo real de banco de horas.
+            </p>
+          </>
+        )}
         {isCycle && (
           <>
             <label>

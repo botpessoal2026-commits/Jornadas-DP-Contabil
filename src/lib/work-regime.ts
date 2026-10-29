@@ -1,4 +1,5 @@
 import type { LegalRule, Model, Schedule } from "./types";
+import { constitutionalPhaseForDate } from "./legal-reference";
 
 export const default12x36Values: Record<string, number | boolean | string> = {
   tipo_regime: "12x36",
@@ -96,9 +97,5 @@ export function validateRegimeValues(
 
 /** Official EC 141/2026, arts. 1, 2 and 6. Values are protective ceilings. */
 export function constitutionalPhase(date: string) {
-  if (date >= "2027-12-16")
-    return { start: "2027-12-16", weekly: 2400, rests: 2 };
-  if (date >= "2026-12-16")
-    return { start: "2026-12-16", weekly: 2520, rests: 2 };
-  return { start: "1988-10-05", weekly: 2640, rests: 1 };
+  return constitutionalPhaseForDate(date);
 }

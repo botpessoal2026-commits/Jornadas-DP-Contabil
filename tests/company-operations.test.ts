@@ -306,6 +306,13 @@ test("troca com fontes conferidas e horários compatíveis pode ser aplicada ap�
     ...rule,
     id: `confirmed-rule-${index}`,
     confirmado: true,
+    valor: {
+      ...rule.valor,
+      fundamento_tipo: "cct",
+      fundamento_referencia: "Instrumento RH-527, compensação diária",
+      periodo_compensacao: "ano",
+      comprovado: true,
+    },
   }));
   input.schedules = [employee, colleague].map((person) => ({
     ...schedule(person.id),

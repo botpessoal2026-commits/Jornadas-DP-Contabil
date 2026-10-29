@@ -1,14 +1,9 @@
 "use client";
+import { validateScheduleInputs } from "@/lib/validation";
 import { useState } from "react";
 import { CalendarDays, FileText, Plus, UserRound } from "lucide-react";
 import { buildAlertSummary } from "@/lib/alerts";
-import {
-  computeDay,
-  dateUTC,
-  evaluate,
-  formatMinutes,
-  span,
-} from "@/lib/engine";
+import { computeDay, dateUTC, formatMinutes, span } from "@/lib/engine";
 import type { Company, Employee } from "@/lib/types";
 import type { Data } from "@/lib/store";
 import { formatCpf } from "@/lib/cpf";
@@ -579,7 +574,7 @@ export function EmployeeDetails({
   const schedule = schedules.find((item) => item.mes.startsWith(month));
   const rules = rulesForCompany(data.rules, company.id);
   const result = schedule
-    ? evaluate(
+    ? validateScheduleInputs(
         schedule.dias,
         rules,
         company,

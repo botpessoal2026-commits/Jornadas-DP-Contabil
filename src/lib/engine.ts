@@ -111,7 +111,7 @@ export function generateDays(
     );
   const dates = monthDates(month);
   const start = includeBoundary
-    ? addDays(monday(dates[0]), model.tipo === "12x36" ? -15 : -1)
+    ? addDays(monday(dates[0]), model.tipo === "12x36" ? -15 : -7)
     : dates[0];
   const end = includeBoundary
     ? addDays(monday(dates.at(-1)!), model.tipo === "12x36" ? 21 : 7)
@@ -195,6 +195,87 @@ export function computeDay(day: Day, rules: LegalRule[], calendarDays?: Day[]) {
     premiumPercent: premium,
   };
 }
+
+/** Count whole 24-hour rests using actual timestamps, including overnight work. */
+function continuousRests(
+  days: Day[],
+  start: string,
+  end: string,
+  assignByStart = false,
+) {
+  const from = +dateUTC(start) / 60000;
+  const to = +dateUTC(addDays(end, 1)) / 60000;
+  const ranges = days
+    .flatMap((day) =>
+      day.intervalos.map((shift) => {
+        const [a, b] = span(shift);
+        const epoch = +dateUTC(day.data) / 60000;
+        return [epoch + a, epoch + b] as [number, number];
+      }),
+    )
+    .filter(([a, b]) => assignByStart || (b > from && a < to))
+    .map(([a, b]) =>
+      assignByStart
+        ? ([a, b] as [number, number])
+        : ([Math.max(a, from), Math.min(b, to)] as [number, number]),
+    )
+    .sort((a, b) => a[0] - b[0]);
+  // Each completed 24h unit belongs to the week in which that unit starts.
+  // This preserves a Saturday/Sunday rest continuing into Monday after a
+  // Friday night shift, without counting the same unit in both weeks.
+  const units = (a: number, b: number) =>
+    assignByStart
+      ? Math.max(
+          0,
+          Math.min(Math.floor((b - a) / 1440), Math.ceil((to - a) / 1440)) -
+            Math.max(0, Math.ceil((from - a) / 1440)),
+        )
+      : Math.floor((b - a) / 1440);
+  let cursor = assignByStart
+    ? Math.min(...days.map((day) => +dateUTC(day.data) / 60000))
+    : from;
+  let rests = 0;
+  for (const [a, b] of ranges) {
+    if (a > cursor) rests += units(cursor, a);
+    cursor = Math.max(cursor, b);
+  }
+  const horizon = assignByStart
+    ? Math.max(...days.map((day) => +dateUTC(addDays(day.data, 1)) / 60000))
+    : to;
+  return rests + Math.max(0, units(cursor, horizon));
+}
+
+function compensationProof(rule: LegalRule, date: string) {
+  const type = String(rule.valor.fundamento_tipo ?? "");
+  const collective =
+    ["cct", "act"].includes(type) &&
+    ["mes", "seis_meses", "ano"].includes(
+      String(rule.valor.periodo_compensacao),
+    );
+  const phase = constitutionalPhase(date);
+  // EC 141, art. 7: distributing the transitional 42h beyond 8h needs CCT/ACT.
+  const allowed =
+    phase.start === "2026-12-16"
+      ? collective
+      : collective ||
+        (type === "acordo_individual" &&
+          ["mes", "seis_meses"].includes(
+            String(rule.valor.periodo_compensacao),
+          )) ||
+        (type === "acordo_tacito_mensal" &&
+          rule.valor.periodo_compensacao === "mes");
+  const reference = String(rule.valor.fundamento_referencia ?? "").trim();
+  return (
+    allowed &&
+    rule.confirmado &&
+    rule.valor.comprovado === true &&
+    !!reference &&
+    !!rule.fonte.trim() &&
+    !/demonstra|exemplo|fict[ií]ci|hip[oó]tese|n[aã]o valid/i.test(
+      `${reference} ${rule.fonte}`,
+    )
+  );
+}
 export function evaluate(
   days: Day[],
   rules: LegalRule[],
@@ -251,6 +332,23 @@ export function evaluate(
       "aviso",
     );
   const used = new Set<string>();
+  const dates = new Set(ordered.map((day) => day.data));
+  const complete = (start: string, end: string) => {
+    for (let date = start; date <= end; date = addDays(date, 1))
+      if (!dates.has(date)) return false;
+    return true;
+  };
+  const pending = (
+    date: string,
+    code: string,
+    message: string,
+    r?: LegalRule,
+  ) => {
+    const key = `${code}:${r?.id ?? "ausente"}:${constitutionalPhase(date).start}`;
+    if (used.has(key)) return;
+    used.add(key);
+    alert(date, code, message, r, "aviso");
+  };
   for (const day of ordered) {
     if (!selected.includes(day)) continue;
     const regime = activeRule(rules, "regime", day.data);
@@ -284,6 +382,18 @@ export function evaluate(
       );
       continue;
     }
+    const phase = constitutionalPhase(day.data);
+    if (
+      (numberValue(regime, "limite_semanal_minutos") ?? Infinity) >
+        phase.weekly ||
+      (numberValue(regime, "descansos_semanais") ?? 0) < phase.rests
+    )
+      pending(
+        day.data,
+        "sem_adequacao_regime",
+        `Revise a regra vigente desde ${phase.start}: teto semanal de ${formatMinutes(phase.weekly)} e ${phase.rests} repouso(s). A permissão no cadastro da empresa não dispensa os limites da vigência constitucional.`,
+        regime,
+      );
     const civilSpans = calendarShifts(day, ordered)
       .map(span)
       .sort((a, b) => a[0] - b[0]);
@@ -295,8 +405,8 @@ export function evaluate(
         regime,
       );
     const worked = Math.max(
-      computeDay(day, rules, ordered).computed,
-      computeDay(day, rules).computed,
+      computeDay(day, rules, ordered).worked,
+      computeDay(day, rules).worked,
     );
     if (
       employee?.carga_diaria_minutos &&
@@ -325,18 +435,49 @@ export function evaluate(
         source:
           "Dias de descanso cadastrados no vínculo; conferir contrato e CCT/ACT.",
       });
-    const daily =
+    const configuredDaily =
       regime.valor.permite_limite_empresa === false
         ? numberValue(regime, "limite_diario_minutos")
         : (company.limite_diario_minutos ??
           numberValue(regime, "limite_diario_minutos"));
+    // The common regime cannot acquire the 12x36 ceiling by changing a number.
+    // CLT, art. 59, §2 limits the ordinary compensation workday to ten hours.
+    const daily =
+      configuredDaily === undefined
+        ? undefined
+        : Math.min(600, configuredDaily);
+    if (configuredDaily !== undefined && configuredDaily > 600)
+      pending(
+        day.data,
+        "sem_enquadramento_comum",
+        "O limite cadastrado supera 10h para a jornada comum (CLT, art. 59, §2º). Confira o enquadramento e os parâmetros; uma CCT ou opção de cadastro não transforma esta jornada em 12×36. O teto comum de 10h continua sendo verificado.",
+        regime,
+      );
+    const baseDaily = Math.min(
+      480,
+      numberValue(regime, "limite_diario_minutos") ?? 480,
+    );
+    if (
+      daily !== undefined &&
+      daily > baseDaily &&
+      worked > baseDaily &&
+      !compensationProof(regime, day.data)
+    )
+      pending(
+        day.data,
+        "sem_compensacao_diaria",
+        phase.start === "2026-12-16"
+          ? "A ampliação diária para distribuir a jornada de 42h na transição exige CCT ou ACT comprovado e conferido (EC nº 141/2026, art. 7º). Registre modalidade, referência e comprovação; o teto da empresa sozinho não autoriza a compensação."
+          : "Confira a base da compensação diária: CCT/ACT ou acordo individual, com modalidade, período, referência e comprovação. Acordo tácito somente para compensação no mesmo mês; o teto da empresa sozinho não comprova a autorização (CLT, art. 59).",
+        regime,
+      );
     if (daily === undefined)
       alert(day.data, "sem_limite", "Limite diário não configurado.", regime);
     else if (worked > daily + 0.001)
       alert(
         day.data,
         "diario",
-        `${formatMinutes(worked)} na data civil ou na jornada iniciada supera o limite diário de ${formatMinutes(daily)}${company.limite_diario_minutos !== null && regime.valor.permite_limite_empresa !== false ? " previsto na configuração da empresa. CCT: " + (company.cct || "não informada") : "."}`,
+        `${formatMinutes(worked)} na data civil ou na jornada iniciada supera o limite diário de ${formatMinutes(daily)}${configuredDaily !== undefined && configuredDaily > 600 ? " da jornada comum (CLT, art. 59, §2º)." : company.limite_diario_minutos !== null && regime.valor.permite_limite_empresa !== false ? " previsto na configuração da empresa. CCT: " + (company.cct || "não informada") : "."}`,
         regime,
       );
     if (!interval)
@@ -404,6 +545,26 @@ export function evaluate(
           night,
           "aviso",
         );
+      const rollingStart = addDays(day.data, -6);
+      if (!complete(addDays(rollingStart, -1), day.data))
+        pending(
+          day.data,
+          "sem_contexto_descanso",
+          "Faltam dias anteriores para conferir o repouso contínuo e a sequência de trabalho entre semanas ou competências. Dias ausentes não são presumidos como folga.",
+          regime,
+        );
+      else if (continuousRests(ordered, rollingStart, day.data) < 1)
+        alerts.push({
+          date: day.data,
+          code: "descanso_consecutivo",
+          severity: "erro",
+          message:
+            "Não há repouso contínuo de 24h na janela de sete dias. Confira os dias consecutivos de trabalho, inclusive a passagem entre semanas e meses.",
+          rule: regime.nome,
+          source: regime.fonte,
+          ruleId: regime.id,
+          period: { start: rollingStart, end: day.data },
+        });
     }
   }
   const weeks = [...new Set(selected.map((d) => monday(d.data)))].map(
@@ -413,18 +574,42 @@ export function evaluate(
       );
       const regimes = week.map((d) => activeRule(rules, "regime", d.data));
       const limits = regimes
-        .map((r) => numberValue(r, "limite_semanal_minutos"))
+        .map((r, index) => {
+          const configured = numberValue(r, "limite_semanal_minutos");
+          return configured === undefined
+            ? undefined
+            : Math.min(
+                configured,
+                constitutionalPhase(week[index].data).weekly,
+              );
+        })
         .filter((x): x is number => x !== undefined);
       const total = week.reduce(
+        (s, d) => s + computeDay(d, rules, ordered).worked,
+        0,
+      );
+      const computedTotal = week.reduce(
         (s, d) => s + computeDay(d, rules, ordered).computed,
         0,
       );
-      const limit = limits.length ? Math.min(...limits) : undefined;
-      const rule = regimes.find(
-        (r) => numberValue(r, "limite_semanal_minutos") === limit,
-      );
+      const transitional =
+        new Set(
+          week.map(
+            (day, index) =>
+              `${regimes[index]?.id ?? "ausente"}:${constitutionalPhase(day.data).start}`,
+          ),
+        ).size > 1;
+      // A new ceiling cannot be applied retroactively to the whole week. An
+      // excess above both ceilings is definite; the intermediate case needs review.
+      const limit = limits.length
+        ? transitional
+          ? Math.max(...limits)
+          : Math.min(...limits)
+        : undefined;
+      const rule = regimes.find((r) => !!r);
       const reference =
         week.find((d) => d.data.startsWith(month.slice(0, 7)))?.data ?? start;
+      const completeWeek = complete(addDays(start, -1), addDays(start, 7));
       if (week.length < 7)
         alert(
           reference,
@@ -451,22 +636,37 @@ export function evaluate(
           `Semana ${start}: ${formatMinutes(total)} excede ${formatMinutes(limit)}.`,
           rule,
         );
-      if (new Set(regimes.map((r) => r?.id)).size > 1)
+      if (transitional)
         alert(
           reference,
           "transicao",
-          `Semana de transição (${start} a ${addDays(start, 6)}): aplicado preventivamente o menor teto, ${limit === undefined ? "ausente" : formatMinutes(limit)}. Confira o tratamento na CCT.`,
+          `Semana de transição (${start} a ${addDays(start, 6)}): tetos de ${limits.length ? formatMinutes(Math.min(...limits)) : "não informado"} a ${limit === undefined ? "não informado" : formatMinutes(limit)}. O teto novo não é aplicado retroativamente às horas anteriores. Confira e justifique o tratamento no instrumento aplicável; apenas ultrapassagens de ambos os tetos são classificadas como excesso semanal nesta janela.`,
           rule,
           "aviso",
         );
-      const rests = week.filter(
-        (d) => computeDay(d, rules, ordered).worked === 0,
-      ).length;
-      const needed = Math.max(
-        0,
-        ...regimes.map((r) => numberValue(r, "descansos_semanais") ?? 0),
+      const rests = completeWeek
+        ? continuousRests(ordered, start, addDays(start, 6), true)
+        : week.filter((day) => computeDay(day, rules, ordered).worked === 0)
+            .length;
+      if (week.length === 7 && !completeWeek)
+        pending(
+          reference,
+          "sem_contexto_descanso",
+          "Falta a véspera ou o dia seguinte da semana para conferir repousos contínuos e turnos noturnos sem presumir os dias ausentes como folga.",
+          rule,
+        );
+      const restLimits = regimes.map((r, index) =>
+        Math.max(
+          numberValue(r, "descansos_semanais") ?? 0,
+          constitutionalPhase(week[index].data).rests,
+        ),
       );
-      if (rests < needed && !(company.permite_6x1 && rests >= 1))
+      const needed = restLimits.length
+        ? transitional
+          ? Math.min(...restLimits)
+          : Math.max(...restLimits)
+        : 0;
+      if (completeWeek && rests < needed)
         alert(
           reference,
           "descanso",
@@ -498,7 +698,14 @@ export function evaluate(
           rule,
           "aviso",
         );
-      return { start, end: addDays(start, 6), total, limit, rests };
+      return {
+        start,
+        end: addDays(start, 6),
+        total,
+        computedTotal,
+        limit,
+        rests,
+      };
     },
   );
   const periods = selected.reduce<
@@ -1002,6 +1209,10 @@ function evaluate12x36(
         rests,
         limit: undefined,
         total: week.reduce(
+          (sum, day) => sum + computeDay(day, rules, ordered).worked,
+          0,
+        ),
+        computedTotal: week.reduce(
           (sum, day) => sum + computeDay(day, rules, ordered).computed,
           0,
         ),
@@ -1076,6 +1287,7 @@ export function duplicateDays(
   company: Company,
   holidays: Holiday[],
   restOnHolidays = true,
+  sourceMonth?: string,
 ): Day[] {
   const generated = generateDays(
     targetMonth,
@@ -1085,7 +1297,24 @@ export function duplicateDays(
     restOnHolidays,
   );
   if (model.tipo === "12x36") return generated;
-  const original = source;
+  const uniqueSource = [
+    ...new Map(source.map((day) => [day.data, day])).values(),
+  ];
+  const monthCounts = new Map<string, number>();
+  for (const day of uniqueSource) {
+    const key = day.data.slice(0, 7);
+    monthCounts.set(key, (monthCounts.get(key) ?? 0) + 1);
+  }
+  // Generated schedules contain neighboring dates for validation. They must not
+  // become the first weekday occurrence when copying the actual source month.
+  const sourcePeriod =
+    sourceMonth?.slice(0, 7) ??
+    [...monthCounts].sort(
+      (a, b) => b[1] - a[1] || a[0].localeCompare(b[0]),
+    )[0]?.[0];
+  const original = uniqueSource.filter((day) =>
+    day.data.startsWith(sourcePeriod ?? ""),
+  );
   return generated.map((day) => {
     if (!day.data.startsWith(targetMonth) || (day.feriado && restOnHolidays))
       return day;

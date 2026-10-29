@@ -14,6 +14,7 @@ import type {
 import type { CompanyOperation } from "./company-operations";
 import type { ScheduleVersion } from "./schedule-governance";
 import { initialHolidays, initialModels, initialRules } from "./presets";
+import { missingReferenceRules } from "./legal-reference";
 export type AuditLog = {
   id: string;
   tabela: string;
@@ -485,11 +486,14 @@ export async function importCompanyEmployees(
 }
 export async function importDefaults(data: Data) {
   if (!supabase) throw new Error("Supabase não configurado.");
-  if (!data.rules.some((rule) => !rule.empresa_id)) {
-    const { error } = await supabase
-      .from("parametros_legais")
-      .insert(initialRules);
-    if (error) throw new Error(error.message);
+  const references = missingReferenceRules(
+    data.rules.filter((rule) => !rule.empresa_id),
+    initialRules,
+  );
+  for (const rule of references) {
+    const { error } = await supabase.from("parametros_legais").insert(rule);
+    // A concurrent import may have created this reference. Never overwrite it.
+    if (error && error.code !== "23505") throw new Error(error.message);
   }
   if (!data.models.some((model) => !model.empresa_id)) {
     const { error } = await supabase

@@ -1,9 +1,4 @@
-import {
-  initialModels,
-  initialRules,
-  initialHolidays,
-  demonstrationRules,
-} from "./presets";
+import { initialModels, initialRules, initialHolidays } from "./presets";
 import type { Data } from "./store";
 import { generateDays } from "./engine";
 export function demoData(): Data {
@@ -72,7 +67,7 @@ export function demoData(): Data {
     companies: [company, otherCompany],
     employees: [employee, otherEmployee],
     models: [...models, otherModel],
-    rules: [...initialRules, ...demonstrationRules].map((r, i) => ({
+    rules: initialRules.map((r, i) => ({
       ...r,
       id: `demo-rule-${i}`,
     })),

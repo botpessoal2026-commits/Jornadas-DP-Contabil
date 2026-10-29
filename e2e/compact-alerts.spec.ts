@@ -78,7 +78,7 @@ test("conferência sem ocorrências ocupa linhas compactas e preserva pendência
   );
 });
 
-test("impedimentos e atenção abrem ao editar e voltam a compactos ao corrigir por teclado", async ({
+test("bloqueantes e informativos aparecem ao editar e voltam a compactos ao corrigir por teclado", async ({
   page,
 }) => {
   await openMonthWithoutOccurrences(page);
@@ -95,16 +95,13 @@ test("impedimentos e atenção abrem ao editar e voltam a compactos ao corrigir 
   });
   await expect(
     conference.getByRole("heading", {
-      name: "Violações impeditivas",
+      name: "Bloqueantes",
       exact: true,
     }),
   ).toBeVisible();
-  await expect(
-    conference.getByRole("heading", {
-      name: "Alertas de atenção",
-      exact: true,
-    }),
-  ).toBeVisible();
+  // Night work is informational; daily/rest excess keeps its blocking level.
+  await expect(conference.getByTestId("informative-alerts")).toBeVisible();
+  await expect(conference.locator(".alert-section.attention")).toHaveCount(0);
   await expect(
     conference.getByText("Sem violações impeditivas", { exact: true }),
   ).toHaveCount(0);

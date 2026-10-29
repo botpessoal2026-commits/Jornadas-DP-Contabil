@@ -32,24 +32,24 @@ test("dezembro apresenta dois regimes conforme corte, inclusive dentro da mesma 
   assert.deepEqual(
     result.periods.map((p) => [p.start, p.end, p.divisor]),
     [
-      ["2026-12-01", "2026-12-14", 220],
-      ["2026-12-15", "2026-12-31", 210],
+      ["2026-12-01", "2026-12-15", 220],
+      ["2026-12-16", "2026-12-31", 210],
     ],
   );
   assert.ok(result.alerts.some((a) => a.code === "transicao"));
 });
-test("editar vigência para dia 16 altera cálculo sem alterar motor", () => {
+test("editar vigência de referência altera cálculo sem alterar motor", () => {
   const changed = rules.map((r) =>
-    r.chave === "regime" && r.inicio_vigencia === "2026-12-15"
-      ? { ...r, inicio_vigencia: "2026-12-16" }
+    r.chave === "regime" && r.inicio_vigencia === "2026-12-16"
+      ? { ...r, inicio_vigencia: "2026-12-17" }
       : r,
   );
   assert.equal(
-    activeRule(changed, "regime", "2026-12-15")?.valor.limite_semanal_minutos,
+    activeRule(changed, "regime", "2026-12-16")?.valor.limite_semanal_minutos,
     2640,
   );
   assert.equal(
-    activeRule(changed, "regime", "2026-12-16")?.valor.limite_semanal_minutos,
+    activeRule(changed, "regime", "2026-12-17")?.valor.limite_semanal_minutos,
     2520,
   );
 });

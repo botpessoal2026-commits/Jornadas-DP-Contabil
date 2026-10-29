@@ -63,7 +63,6 @@ import {
   dateUTC,
   dominioText,
   duplicateDays,
-  evaluate,
   formatMinutes,
   minutes,
   monthDates,
@@ -84,6 +83,7 @@ import type {
 import { contractMinutesFromHours } from "@/lib/contract";
 import { scheduleRegime, validateRegimeValues } from "@/lib/work-regime";
 import { validationDays } from "@/lib/schedule-context";
+import { validateScheduleInputs } from "@/lib/validation";
 import { normalizeCpf } from "@/lib/cpf";
 import { demoData } from "@/lib/demo";
 import LegalFields from "./legal-fields";
@@ -91,6 +91,7 @@ import CompanyDirectory from "./company-directory";
 import CompanyAdmin, { type CompanyView } from "./company-admin";
 import CompanyFields from "./company-fields";
 import ModelFields from "./model-fields";
+import WorkspaceSidebar from "./workspace-sidebar";
 import { validateShiftText } from "@/lib/shift-editor";
 import AuditHistory from "./audit-history";
 import { EmployeeDirectory, EmployeeDetails } from "./employee-admin";
@@ -974,7 +975,7 @@ export default function Workspace() {
     if (!schedule || !reportCompany) return { value: null, error: null };
     try {
       return {
-        value: evaluate(
+        value: validateScheduleInputs(
           schedule.dias,
           reportData.rules,
           reportCompany,
@@ -1025,7 +1026,7 @@ export default function Workspace() {
       employee &&
       !calculation.error &&
       modal?.kind === "dia"
-        ? evaluate(
+        ? validateScheduleInputs(
             projectSchedule(
               {
                 ...schedule,
@@ -1761,6 +1762,7 @@ export default function Workspace() {
                 employeeLocation(company, e, data.establishments ?? []),
                 data.holidays,
                 false,
+                s.mes,
               ),
               next.dias,
             ),
@@ -2325,6 +2327,7 @@ export default function Workspace() {
                 employeeLocation(company, person, data.establishments ?? []),
                 data.holidays,
                 false,
+                source.mes,
               ),
               next.dias,
             ),
@@ -2872,40 +2875,13 @@ export default function Workspace() {
       <a href="#main-content" className="skip-link">
         Ir para conteúdo
       </a>
-      <aside id="workspace-menu" className={`sidebar ${mobile ? "open" : ""}`}>
-        <Brand light />
-        <div className="nav-label">
-          {companyScopeId ? "ADMINISTRAÇÃO DA EMPRESA" : "ÁREA GERAL"}
-        </div>
-        {nav.slice(0, 5).map(([id, label, Icon]) => (
-          <button
-            key={id}
-            className={`nav ${page === id ? "active" : ""}`}
-            aria-current={page === id ? "page" : undefined}
-            onClick={() => navigate(id)}
-          >
-            <Icon size={17} />
-            {label}
-            {page === id && <ChevronRight size={14} className="ml-auto" />}
-          </button>
-        ))}
-        <div className="nav-label mt-4">CONFIGURAÇÕES</div>
-        {nav.slice(5).map(([id, label, Icon]) => (
-          <button
-            key={id}
-            className={`nav ${page === id ? "active" : ""}`}
-            aria-current={page === id ? "page" : undefined}
-            onClick={() => navigate(id)}
-          >
-            <Icon size={17} />
-            {label}
-          </button>
-        ))}
-        <div className="side-note">
-          <ShieldCheck size={20} className="mb-2" />
-          <strong>Regras claras, decisões seguras.</strong>Confira os parâmetros
-          legais e o instrumento aplicável antes de aprovar cada escala.
-        </div>
+      <WorkspaceSidebar
+        page={page}
+        companyScoped={Boolean(companyScopeId)}
+        mobileOpen={mobile}
+        onNavigate={navigate}
+        onCloseMobile={() => setMobile(false)}
+      >
         <div className="profile">
           <div className="avatar">DP</div>
           <div className="min-w-0">
@@ -2969,7 +2945,7 @@ export default function Workspace() {
             <LogOut size={16} />
           </button>
         </div>
-      </aside>
+      </WorkspaceSidebar>
       <main className="main" id="main-content" tabIndex={-1}>
         <header className="topbar">
           <div className="actions">
@@ -4097,8 +4073,14 @@ export default function Workspace() {
                       <div className="stats">
                         <Stat
                           label="Horas no mês"
-                          value={report ? formatMinutes(report.total) : "—"}
-                          note="Total por data civil, com hora noturna reduzida"
+                          value={
+                            report ? formatMinutes(report.clockTotal) : "—"
+                          }
+                          note={
+                            report
+                              ? `Relógio · Computadas: ${formatMinutes(report.total)}; sem apuração salarial`
+                              : "Total por data civil"
+                          }
                           icon={Clock3}
                         />
                         <Stat
@@ -4126,9 +4108,9 @@ export default function Workspace() {
                           icon={SlidersHorizontal}
                         />
                         <Stat
-                          label="Violações impeditivas"
+                          label="Bloqueantes"
                           value={alertSummary.counts.violations}
-                          note={`${alertSummary.counts.attention} avisos · ${alertSummary.counts.pendingSources} fontes/regras pendentes`}
+                          note={`${alertSummary.counts.attention} de atenção · ${alertSummary.informative.length} informativos · ${alertSummary.counts.pendingSources} fontes pendentes`}
                           icon={ShieldCheck}
                         />
                       </div>
@@ -4257,8 +4239,8 @@ export default function Workspace() {
                                   <th>Semana</th>
                                   <th>
                                     {schedule.modelo_tipo === "12x36"
-                                      ? "Horas na semana"
-                                      : "Horas / teto"}
+                                      ? "Relógio na semana"
+                                      : "Relógio / teto"}
                                   </th>
                                   <th>
                                     {schedule.modelo_tipo === "12x36"
@@ -4316,6 +4298,12 @@ export default function Workspace() {
                                           ? formatMinutes(w.limit)
                                           : "—"}
                                       </span>
+                                      {w.computedTotal !== w.total && (
+                                        <small className="block muted">
+                                          Computadas:{" "}
+                                          {formatMinutes(w.computedTotal)}
+                                        </small>
+                                      )}
                                     </td>
                                     <td>{w.rests} dia(s)</td>
                                   </tr>
@@ -4493,6 +4481,8 @@ export default function Workspace() {
                                     {
                                       violations: review.impedimentos,
                                       pendingSources: review.fontes_pendentes,
+                                      attention: review.atencoes ?? 0,
+                                      informative: review.informativos ?? 0,
                                     },
                                   ),
                                 );
@@ -4955,7 +4945,7 @@ export default function Workspace() {
                         await importDefaults(data);
                         await refresh();
                         notify(
-                          "Cadastros iniciais importados. Revise antes de confirmar as regras.",
+                          "Referências ausentes importadas. Parâmetros existentes preservados; confira a aplicação aos vínculos.",
                         );
                       })
                     }
@@ -4978,9 +4968,10 @@ export default function Workspace() {
                   <strong>Confira a aplicabilidade dos parâmetros.</strong>
                   <br />A EC nº 141/2026 prevê 42h e dois repousos a partir de
                   16/12/2026 e 40h a partir de 16/12/2027. As regras cadastradas
-                  e os exemplos antigos não são atualizados automaticamente.
-                  Confira vigência, enquadramento e instrumento aplicável antes
-                  de confirmar uma regra.
+                  não são substituídas automaticamente. Use Importar referências
+                  para acrescentar as vigências ausentes, sem sobrescrever
+                  dados. Confira vigência, enquadramento e instrumento aplicável
+                  antes de confirmar uma regra.
                 </div>
               </div>
               <section className="panel">

@@ -1,0 +1,270 @@
+/* Modernização: navegação por áreas, recolhimento e foco no conteúdo. */
+.sidebar.workspace-sidebar {
+  padding: 12px 14px 16px;
+  gap: 0;
+  overscroll-behavior: contain;
+}
+.workspace-sidebar .sidebar-controls {
+  display: flex;
+  align-items: center;
+  min-height: 36px;
+  gap: 8px;
+  margin-bottom: 8px;
+  flex-shrink: 0;
+}
+.workspace-sidebar .sidebar-context {
+  color: #c1d7e9;
+  font-size: 11px;
+  font-weight: 600;
+  padding-left: 9px;
+}
+.workspace-sidebar .sidebar-collapse,
+.workspace-sidebar .sidebar-close {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  flex-shrink: 0;
+  margin-left: auto;
+  border: 1px solid #ffffff2b;
+  border-radius: 8px;
+  background: #ffffff08;
+  color: #edf5ff;
+}
+.workspace-sidebar .sidebar-close {
+  display: none;
+}
+.workspace-sidebar .sidebar-collapse:hover,
+.workspace-sidebar .sidebar-close:hover {
+  background: #ffffff19;
+}
+.workspace-sidebar .sidebar-brand {
+  padding: 0 9px 12px;
+}
+.workspace-sidebar .sidebar-brand .brand-logo {
+  max-width: 160px;
+}
+.workspace-sidebar .sidebar-brand .brand-product {
+  margin-top: 8px;
+  padding-top: 9px;
+  font-size: 12px;
+}
+.workspace-sidebar .sidebar-brand .brand-caption {
+  font-size: 9px;
+  letter-spacing: 1px;
+  margin-top: 3px;
+}
+.workspace-sidebar .sidebar-symbol {
+  display: none;
+  justify-content: center;
+  padding: 2px 0 12px;
+}
+.workspace-sidebar .sidebar-group {
+  margin-bottom: 5px;
+}
+.workspace-sidebar .sidebar-group-label {
+  color: #b0c9df;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.7px;
+  padding: 10px 11px 4px;
+}
+.workspace-sidebar .nav {
+  min-height: 38px;
+  padding: 9px 11px;
+  gap: 10px;
+  margin: 2px 0;
+  font-size: 12px;
+  line-height: 1.4;
+  color: #d2e2f0;
+}
+.workspace-sidebar .nav svg {
+  flex-shrink: 0;
+}
+.workspace-sidebar .nav.active {
+  color: #fff;
+}
+.workspace-sidebar .sidebar-active-arrow {
+  margin-left: auto;
+}
+.workspace-sidebar .sidebar-review-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 10px;
+  margin-top: 14px;
+  font-size: 11px;
+  line-height: 1.5;
+  color: #c1d7e9;
+}
+.workspace-sidebar .sidebar-review-note svg {
+  flex-shrink: 0;
+  color: #7ddaf6;
+}
+.workspace-sidebar .sidebar-account {
+  margin-top: auto;
+  padding-top: 6px;
+  flex-shrink: 0;
+}
+.workspace-sidebar .profile {
+  padding-top: 12px;
+}
+.workspace-sidebar button:focus-visible {
+  outline: 2px solid #7edcff;
+  outline-offset: 3px;
+}
+@media (min-width: 761px) {
+  .sidebar.workspace-sidebar.is-collapsed {
+    width: 76px;
+    padding: 12px 10px 16px;
+  }
+  .shell:has(> .sidebar.workspace-sidebar.is-collapsed) > .main {
+    margin-left: 76px;
+    width: calc(100% - 76px);
+  }
+  .workspace-sidebar.is-collapsed .sidebar-context,
+  .workspace-sidebar.is-collapsed .sidebar-full-brand,
+  .workspace-sidebar.is-collapsed .sidebar-group-label,
+  .workspace-sidebar.is-collapsed .sidebar-link-label,
+  .workspace-sidebar.is-collapsed .sidebar-active-arrow,
+  .workspace-sidebar.is-collapsed .sidebar-review-note,
+  .workspace-sidebar.is-collapsed .sidebar-account .profile > .avatar,
+  .workspace-sidebar.is-collapsed .sidebar-account .profile > .min-w-0 {
+    display: none;
+  }
+  .workspace-sidebar.is-collapsed .sidebar-symbol {
+    display: flex;
+  }
+  .workspace-sidebar.is-collapsed .sidebar-controls {
+    justify-content: center;
+  }
+  .workspace-sidebar.is-collapsed .sidebar-collapse {
+    margin: 0;
+  }
+  .workspace-sidebar.is-collapsed .sidebar-group + .sidebar-group {
+    border-top: 1px solid #ffffff21;
+    padding-top: 7px;
+    margin-top: 7px;
+  }
+  .workspace-sidebar.is-collapsed .nav {
+    justify-content: center;
+    width: 44px;
+    min-height: 44px;
+    padding: 10px;
+    margin-inline: auto;
+  }
+  .workspace-sidebar.is-collapsed .profile {
+    justify-content: center;
+    padding: 12px 0 0;
+  }
+  .workspace-sidebar.is-collapsed .profile .icon-button {
+    margin: 0;
+  }
+}
+@media (max-width: 760px) {
+  .sidebar.workspace-sidebar {
+    width: min(285px, calc(100vw - 40px));
+    padding-inline: 15px;
+  }
+  .workspace-sidebar .sidebar-collapse {
+    display: none;
+  }
+  .workspace-sidebar .sidebar-close {
+    display: grid;
+    width: 44px;
+    height: 44px;
+  }
+  .workspace-sidebar .sidebar-controls {
+    margin-bottom: 4px;
+  }
+  .workspace-sidebar .nav {
+    min-height: 44px;
+  }
+}
+@media print {
+  .shell:has(> .sidebar.workspace-sidebar.is-collapsed) > .main {
+    margin-left: 0;
+    width: 100%;
+  }
+}
+
+/* Mathematical proposal and neutral information share the existing tokens. */
+.schedule-simulator {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 14px;
+  min-width: 0;
+}
+.schedule-simulator > summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 650;
+  cursor: pointer;
+  color: var(--primary);
+}
+.schedule-simulator p,
+.schedule-simulator fieldset,
+.schedule-simulator .form-grid {
+  margin-block: 12px;
+}
+.schedule-simulator fieldset {
+  border: 0;
+  padding: 0;
+  min-width: 0;
+}
+.schedule-simulator legend {
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+.schedule-simulator .checkbox {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 36px;
+}
+.schedule-simulator .checkbox input {
+  width: 18px;
+  height: 18px;
+}
+.schedule-simulator .table-scroll {
+  overflow-x: auto;
+  margin-block: 12px;
+}
+.schedule-simulator caption {
+  text-align: left;
+  color: var(--muted);
+  padding-block: 8px;
+  font-weight: 600;
+}
+.alert-section.informative {
+  border: 1px solid var(--line);
+  background: var(--surface-soft);
+  border-radius: 9px;
+  padding: 12px;
+}
+.alert-section.informative > summary {
+  cursor: pointer;
+  color: var(--ink);
+}
+.alert-section-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-weight: 650;
+}
+.alert-group.informative {
+  border-color: var(--line);
+  background: var(--surface);
+}
+[data-theme="dark"] .schedule-simulator > summary {
+  color: #8bd8ff;
+}
+@media (max-width: 760px) {
+  .schedule-simulator {
+    padding: 10px;
+  }
+  .schedule-simulator .checkbox {
+    min-height: 44px;
+  }
+}
