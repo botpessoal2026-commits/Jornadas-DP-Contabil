@@ -694,6 +694,7 @@ async function mockAuthenticatedPersistence(page: Page) {
     datas_especiais: data.specialDates,
     estabelecimentos: data.establishments,
     registros_operacionais: [],
+    nomes_login: [],
   };
   const mutations: { rpc: string; body: Record<string, unknown> }[] = [];
   const unexpected: string[] = [];
@@ -858,6 +859,9 @@ test("modo autenticado com transporte simulado recarrega eventos e exceções sa
 }) => {
   const mock = await mockAuthenticatedPersistence(page);
   await page.goto(`/?empresa=${mock.companyId}&pagina=feriados&mes=2026-12`);
+  await page
+    .getByRole("button", { name: "Entrar com e-mail existente", exact: true })
+    .click();
   await page
     .getByLabel("E-mail", { exact: true })
     .fill("teste-local@example.invalid");
