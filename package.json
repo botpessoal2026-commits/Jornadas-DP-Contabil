@@ -10,7 +10,8 @@
     "typecheck": "tsc --noEmit",
     "test:e2e": "playwright test",
     "format:check": "prettier --check src tests e2e *.ts *.mjs",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "db:sql": "node scripts/gerar-sql-instalacao.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.76.1",

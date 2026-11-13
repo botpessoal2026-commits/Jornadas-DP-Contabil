@@ -1,5 +1,7 @@
 # Gerador de Jornadas
 
+Para **contas reais por e-mail e dados persistentes**, siga [o passo a passo de ativação](docs/CONTAS_REAIS.md). A entrada `/ferramenta` abre a conta real; a demonstração está separada em `/demonstracao`.
+
 Aplicação em português para o Departamento Pessoal organizar empresas, funcionários e escalas mensais. Next.js App Router, TypeScript, Tailwind e Supabase Auth/Postgres/RLS. Exporta PDF para conferência e assinatura, XLSX e CSV.
 
 ## Situação da entrega
@@ -10,7 +12,13 @@ Aplicação em português para o Departamento Pessoal organizar empresas, funcio
 - Criação do projeto Supabase, aplicação da migration no serviço e publicação Vercel dependem do acesso às respectivas contas. Nenhum projeto pago é criado pelo código.
 - Regras e instrumentos não são certificados automaticamente. As referências legais são editáveis, têm vigência e fonte, e novas referências entram somente por importação explícita sem substituir cadastros.
 
-## Usuário, senha e persistência — 29/10/2026
+## Contas por e-mail — 13/11/2026
+
+O acesso principal usa Supabase Auth com nome, e-mail, senha e confirmação. Entrar, sair, confirmar cadastro e recuperar senha não dependem da chave privada do login legado. A sessão é renovada pelo SDK e os cadastros/escalas continuam no mesmo banco com RLS. A entrada `/ferramenta` abre o aplicativo real; a demonstração fica em `/demonstracao`. Consulte [CONTAS_REAIS.md](docs/CONTAS_REAIS.md) para os SQLs seguros, variáveis, callbacks e teste completo de persistência.
+
+As seções datadas abaixo registram entregas anteriores; a configuração atual de acesso está descrita acima.
+
+## Histórico: usuário, senha e persistência — 29/10/2026
 
 O acesso principal passa a usar **Usuário e Senha**, preservando o Supabase Auth. Contas anteriores entram por e-mail uma vez e definem o usuário em **Meu acesso**, mantendo o mesmo UUID, senha e cadastros. O e-mail continua somente no cadastro/recuperação. Uma conta nova não é criada para renomear o acesso existente.
 
@@ -35,7 +43,6 @@ A migration incremental `20261029123937_three_level_review_attestation.sql` foi 
 Validação desta modernização: **297 testes unitários/SQL aprovados e 78 cenários de navegador validados**, com 14 cenários afetados aprovados na reexecução final após atualizar seletores/expectativas. Build, TypeScript, Prettier e diff-check aprovados. Auditoria de dependências de produção: zero vulnerabilidades reportadas. Desktop/mobile, temas e demonstração inspecionados sem erros JavaScript ou transbordamento horizontal.
 
 Escopo, arquivos, execução detalhada e pendências: [docs/MODERNIZACAO.md](docs/MODERNIZACAO.md).
-
 
 ## Melhorias da revisão — 29/10/2026
 
@@ -100,7 +107,7 @@ cp .env.example .env.local
 npm run dev
 ```
 
-Para testar a interface sem Supabase, abra a aplicação e clique em **Explorar demonstração**. Cadastros desaparecem ao sair ou recarregar; a recuperação opcional de prévias locais é descrita acima. O cenário demonstrativo é dezembro de 2026; contas reais começam no mês atual de São Paulo.
+Para testar a interface sem Supabase, abra `/demonstracao`. Cadastros da demonstração desaparecem ao sair ou recarregar; a recuperação opcional de prévias locais é descrita acima. O cenário demonstrativo é dezembro de 2026; contas reais começam no mês atual de São Paulo.
 
 Variáveis do frontend:
 
@@ -111,7 +118,7 @@ As variáveis `NEXT_PUBLIC_` são públicas e incorporadas no build. Depois de a
 
 ## Banco e autenticação
 
-Aplique `supabase/migrations/202610220001_schema.sql` em um **projeto Supabase novo**, pelo SQL Editor ou pelo CLI oficialmente autenticado:
+Em um **projeto Supabase existente**, execute primeiro `supabase/setup/verificar-banco-existente.sql`, que faz somente leitura. Aplique apenas migrations ainda pendentes, conforme o histórico do banco. Para um **projeto novo e vazio**, execute `supabase/setup/instalacao-novo-projeto.sql` no SQL Editor: ele reúne todas as migrations e recusa tabelas do aplicativo já existentes. Alternativamente, use o CLI oficialmente autenticado:
 
 ```sh
 supabase link --project-ref SEU_PROJECT_REF
@@ -124,23 +131,29 @@ No painel **Authentication**:
 
 1. Ative e-mail/senha e confirmação de e-mail.
 2. Configure **Site URL** com a URL final da Vercel.
-3. Inclua a mesma URL raiz nas **Redirect URLs**, além das URLs de desenvolvimento necessárias.
+3. Inclua a URL exata `https://SEU-SITE/login` nas **Redirect URLs**, além de `http://localhost:3000/login` e dos callbacks de Preview necessários.
 4. Configure entrega de e-mails/SMTP apropriada ao uso de produção e os limites de envio do seu plano.
 
-Cada usuário autenticado acessa somente suas próprias empresas e demais cadastros. As contas são isoladas; não existe compartilhamento de escritório/equipe nesta versão. FKs compostas com `user_id` impedem vínculos entre contas, inclusive por chamadas diretas à API. As oito tabelas têm RLS. `log_alteracoes` só admite leitura pela conta proprietária; triggers registram o contexto e os dados antes/depois da alteração. Usuários não têm privilégio de `TRUNCATE`. A RPC `salvar_escalas` mantém RLS e grava a escala e seus dias atomicamente, inclusive duplicação da empresa em lote.
+Cada usuário autenticado acessa somente suas próprias empresas e demais cadastros. As contas são isoladas; não existe compartilhamento de escritório/equipe nesta versão. FKs compostas com `user_id` impedem vínculos entre contas, inclusive por chamadas diretas à API. As 14 tabelas têm RLS. `log_alteracoes` só admite leitura pela conta proprietária; triggers registram o contexto e os dados antes/depois da alteração. Usuários não têm privilégio de `TRUNCATE`. A RPC `salvar_escalas` mantém RLS e grava a escala e seus dias atomicamente, inclusive duplicação da empresa em lote.
 
 Estrutura:
 
 | Tabela              | Conteúdo                                                  |
 | ------------------- | --------------------------------------------------------- |
 | `empresas`          | CNPJ, localidade, CCT, permissões e limite diário         |
-| `funcionarios`      | Nome, CPF opcional, cargo, contrato e descansos          |
+| `funcionarios`      | Nome, CPF opcional, cargo, contrato e descansos           |
 | `modelos_jornada`   | Padrão semanal, turnos e âncora do ciclo 12x36            |
 | `escalas`           | Empresa, funcionário, modelo e competência                |
 | `escala_dias`       | Turnos, folga, feriado e observação por data              |
 | `feriados`          | Data e abrangência nacional/estadual/municipal            |
 | `parametros_legais` | Valores, grupo, vigência, fonte e conferência por usuário |
 | `log_alteracoes`    | Tabela, registro, ação, campos e horário                  |
+| `estabelecimentos` | Unidades da empresa                                      |
+| `datas_especiais`  | Eventos e exceções de calendário                          |
+| `escala_versoes`   | Versões preservadas das escalas                           |
+| `registros_operacionais` | Ausências, documentos e operações do vínculo       |
+| `nomes_login`     | Alias opcional do acesso legado                           |
+| `login_tentativas` | Limitação das tentativas do acesso legado                 |
 
 ## Publicar na Vercel
 
@@ -208,7 +221,6 @@ Esses testes não substituem a validação de Auth, SMTP, migrations e deploy no
 - Banco de horas, prazos e instrumentos de compensação.
 
 A aplicação oferece planejamento e alertas, não parecer jurídico nem cálculo completo de folha.
-
 
 ## Entrega parcial P0: carga contratual estruturada
 

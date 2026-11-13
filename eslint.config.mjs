@@ -15,7 +15,13 @@ export default [
     ],
   },
   {
-    files: ["src/**/*.{ts,tsx}", "tests/**/*.ts", "e2e/**/*.ts", "*.{ts,mjs}"],
+    files: [
+      "src/**/*.{ts,tsx}",
+      "tests/**/*.ts",
+      "e2e/**/*.ts",
+      "scripts/**/*.mjs",
+      "*.{ts,mjs}",
+    ],
     languageOptions: {
       parser: tsParser,
       parserOptions: {
