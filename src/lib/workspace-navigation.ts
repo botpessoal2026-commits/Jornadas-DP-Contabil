@@ -37,6 +37,7 @@ type LocationInput = {
 
 function referenceId(value?: string | null) {
   const id = value?.trim();
+  // eslint-disable-next-line no-control-regex -- Rejeita controles em identificadores de URL.
   return id && id.length <= 200 && !/[\u0000-\u001f\u007f]/u.test(id)
     ? id
     : null;

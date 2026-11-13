@@ -365,6 +365,7 @@ export async function loadScheduleVersions(
     if (migrationError(error))
       throw new Error(
         "Atualização do banco pendente: as versões exigem a migração de governança.",
+        { cause: error },
       );
     throw error;
   }

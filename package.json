@@ -9,7 +9,8 @@
     "test": "tsx --test tests/*.test.ts",
     "typecheck": "tsc --noEmit",
     "test:e2e": "playwright test",
-    "format:check": "prettier --check src tests e2e *.ts *.mjs"
+    "format:check": "prettier --check src tests e2e *.ts *.mjs",
+    "lint": "eslint ."
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.76.1",
@@ -23,11 +24,14 @@
   },
   "devDependencies": {
     "@electric-sql/pglite": "^0.5.11",
+    "@eslint/js": "^10.0.1",
     "@playwright/test": "^1.64.1",
     "@tailwindcss/postcss": "^4.1.0",
     "@types/node": "^24.0.0",
     "@types/react": "^19.2.0",
     "@types/react-dom": "^19.2.0",
+    "@typescript-eslint/parser": "^8.72.2",
+    "eslint": "^10.14.0",
     "prettier": "^3.9.10",
     "tailwindcss": "^4.1.0",
     "tsx": "^4.20.0",

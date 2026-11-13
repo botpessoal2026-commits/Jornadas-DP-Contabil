@@ -504,6 +504,7 @@ export default function CompanyOperations({
                         setImportRows(importRows.slice(saved));
                         throw new Error(
                           `${saved} registros salvos; os demais permanecem na prévia. ${(cause as Error).message}`,
+                          { cause },
                         );
                       }
                       setImportRows([]);

@@ -1922,6 +1922,7 @@ export default function Workspace() {
           setConfirmationPending(true);
           throw new Error(
             "Confirme seu e-mail para ativar o acesso. Se necessário, use Reenviar confirmação.",
+            { cause: error },
           );
         }
         throw error;
@@ -4722,6 +4723,7 @@ export default function Workspace() {
                                   setReadbackPending(true);
                                   throw new Error(
                                     "Situação gravada. Atualize os dados antes de continuar.",
+                                    { cause: error },
                                   );
                                 }
                               }

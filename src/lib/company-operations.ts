@@ -48,6 +48,7 @@ const reference = (value: unknown) =>
   typeof value === "string" &&
   value.length > 0 &&
   value.length <= 200 &&
+  // eslint-disable-next-line no-control-regex -- Rejeita controles em referências externas.
   !/[\u0000-\u001f\u007f]/u.test(value);
 const own = (data: Data, companyId: string, employeeId: unknown) =>
   data.employees.find(

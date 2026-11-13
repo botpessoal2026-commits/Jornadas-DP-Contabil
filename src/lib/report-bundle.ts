@@ -164,6 +164,7 @@ export function zipFiles(files: { name: string; bytes: Uint8Array }[]) {
   for (const file of files) {
     if (
       !file.name ||
+      // eslint-disable-next-line no-control-regex -- Impede controles e separadores no arquivo exportado.
       /[\x00-\x1f\\/]/.test(file.name) ||
       file.name === "." ||
       file.name === ".."
