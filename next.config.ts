@@ -3,6 +3,15 @@ const nextConfig: NextConfig = {
   poweredByHeader: false,
   async headers() {
     return [
+      ...["html", "zip"].map((extension) => ({
+        source: `/arquivos/gerador-de-jornadas-cont-contabil.${extension}`,
+        headers: [
+          {
+            key: "Content-Disposition",
+            value: `attachment; filename="gerador-de-jornadas-cont-contabil.${extension}"`,
+          },
+        ],
+      })),
       {
         source: "/(.*)",
         headers: [
