@@ -5,7 +5,7 @@ test("demonstração: calendário, edições, exportações, duplicação e cada
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
   await page.goto("/");
-  await page.getByRole("button", { name: "Explorar demonstração" }).click();
+  await page.goto("/demonstracao");
   await expect(
     page.getByRole("heading", { name: "Seu mês, bem planejado." }),
   ).toBeVisible();
@@ -91,7 +91,7 @@ for (const width of [375, 390]) {
   }) => {
     await page.setViewportSize({ width, height: 844 });
     await page.goto("/");
-    await page.getByRole("button", { name: "Explorar demonstração" }).click();
+    await page.goto("/demonstracao");
     await page.getByRole("button", { name: "Abrir menu" }).click();
     await page.getByRole("button", { name: "Escalas mensais" }).click();
     await expect(page.getByRole("gridcell")).toHaveCount(31);
@@ -106,7 +106,7 @@ test("carga contratual editável reabre e gera alertas sem substituir observaç�
   page,
 }) => {
   await page.goto("/");
-  await page.getByRole("button", { name: "Explorar demonstração" }).click();
+  await page.goto("/demonstracao");
   await page.getByRole("button", { name: "Funcionários", exact: true }).click();
   const row = page
     .locator(".employee-card")

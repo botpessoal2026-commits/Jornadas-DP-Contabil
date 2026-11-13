@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 
 async function openSchedule(page: Page) {
   await page.goto("/");
-  await page.getByRole("button", { name: "Explorar demonstração" }).click();
+  await page.goto("/demonstracao");
   await page
     .getByRole("button", { name: "Escalas mensais", exact: true })
     .click();
@@ -80,7 +80,7 @@ test("CPF opcional salvo no cadastro alimenta somente a folha do funcionário e 
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
   await page.goto("/");
-  await page.getByRole("button", { name: "Explorar demonstração" }).click();
+  await page.goto("/demonstracao");
   await page.getByRole("button", { name: "Empresas", exact: true }).click();
   await page
     .locator(".company-card")

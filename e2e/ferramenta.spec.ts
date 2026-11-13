@@ -4,7 +4,7 @@ import { createHash } from "node:crypto";
 const originalHTMLSHA256 =
   "cb05b6f42c9346eadecc93e71471aa1f32fb580e5fe0892a232e23ac3dab46e8";
 
-test("ferramenta: abre diretamente a demonstração sem acessar cadastros do Supabase", async ({
+test("demonstração separada: não acessa cadastros do Supabase", async ({
   page,
 }) => {
   const calls: string[] = [];
@@ -12,7 +12,7 @@ test("ferramenta: abre diretamente a demonstração sem acessar cadastros do Sup
     calls.push(route.request().url());
     await route.abort();
   });
-  await page.goto("/ferramenta");
+  await page.goto("/demonstracao");
   await expect(
     page.getByRole("heading", { name: "Seu mês, bem planejado." }),
   ).toBeVisible();
@@ -56,7 +56,7 @@ test("ferramenta: abertura no celular sem transbordamento horizontal", async ({
   page,
 }) => {
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.goto("/ferramenta");
+  await page.goto("/demonstracao");
   await expect(
     page.getByRole("heading", { name: "Seu mês, bem planejado." }),
   ).toBeVisible();

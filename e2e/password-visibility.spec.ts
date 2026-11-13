@@ -7,12 +7,16 @@ test("olhinho mostra e oculta a senha sem perder o valor, o foco ou enviar o log
   page.on("request", (request) => {
     if (
       request.method() === "POST" &&
-      new URL(request.url()).pathname === "/api/auth/username"
+      ["/api/auth/username", "/auth/v1/token"].includes(
+        new URL(request.url()).pathname,
+      )
     )
       loginRequests.push(request.url());
   });
   await page.goto("/");
-  await page.getByLabel("Usuário", { exact: true }).fill("teste.olhinho");
+  await page
+    .getByLabel("E-mail", { exact: true })
+    .fill("teste.olhinho@example.invalid");
   const password = page.getByLabel("Senha", { exact: true });
   await password.fill("Senha visível 123");
   await expect(password).toHaveAttribute("type", "password");
@@ -36,7 +40,9 @@ test("olhinho funciona pelo teclado e não aciona o envio do formulário", async
   page,
 }) => {
   await page.goto("/");
-  await page.getByLabel("Usuário", { exact: true }).fill("teste.teclado");
+  await page
+    .getByLabel("E-mail", { exact: true })
+    .fill("teste.teclado@example.invalid");
   const password = page.getByLabel("Senha", { exact: true });
   await password.fill("Senha teclado 123");
   await password.press("Tab");
@@ -83,9 +89,6 @@ test("trocar entre cadastro, login e recuperação volta a ocultar a senha", asy
     .click();
   await expect(password).toHaveAttribute("type", "password");
   await expect(password).toHaveAttribute("autocomplete", "current-password");
-  await page
-    .getByRole("button", { name: "Entrar com e-mail existente", exact: true })
-    .click();
   await password.fill("Senha e-mail 123");
   await page
     .getByRole("button", { name: "Mostrar senha", exact: true })

@@ -2,7 +2,7 @@ import { test, expect, type Page } from "@playwright/test";
 
 async function openSchedule(page: Page) {
   await page.goto("/");
-  await page.getByRole("button", { name: "Explorar demonstração" }).click();
+  await page.goto("/demonstracao");
   if (await page.getByRole("button", { name: "Abrir menu" }).isVisible())
     await page.getByRole("button", { name: "Abrir menu" }).click();
   await page.getByRole("button", { name: "Escalas mensais" }).click();

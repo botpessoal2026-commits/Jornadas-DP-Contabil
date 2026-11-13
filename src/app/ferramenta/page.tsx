@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 
-/** Entrada explícita na demonstração, sem criar sessão ou alterar dados reais. */
+/** Entrada da ferramenta com autenticação real; a demonstração tem rota própria. */
 export default function FerramentaPage() {
-  redirect("/?demo=1");
+  redirect("/");
 }

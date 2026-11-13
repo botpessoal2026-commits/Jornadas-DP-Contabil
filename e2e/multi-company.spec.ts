@@ -18,7 +18,7 @@ async function sidebar(page: Page, name: string) {
 }
 async function start(page: Page) {
   await page.goto("/");
-  await page.getByRole("button", { name: "Explorar demonstração" }).click();
+  await page.goto("/demonstracao");
   await sidebar(page, "Empresas");
 }
 async function enterCompany(page: Page, name = alpha) {
@@ -457,7 +457,7 @@ test("sair e reabrir demonstração limpa contexto empresarial anterior", async 
     .locator(".sidebar")
     .getByRole("button", { name: "Sair", exact: true })
     .click();
-  await page.getByRole("button", { name: "Explorar demonstração" }).click();
+  await page.goto("/demonstracao");
   await expect(
     page.getByRole("combobox", { name: "Empresa ativa", exact: true }),
   ).toHaveValue("");

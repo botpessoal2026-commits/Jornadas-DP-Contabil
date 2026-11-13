@@ -2,7 +2,7 @@ import { test, expect, type Page } from "@playwright/test";
 
 async function openMonthWithoutOccurrences(page: Page) {
   await page.goto("/");
-  await page.getByRole("button", { name: "Explorar demonstração" }).click();
+  await page.goto("/demonstracao");
   await page
     .locator(".sidebar")
     .getByRole("button", { name: "Empresas", exact: true })

@@ -2746,3 +2746,22 @@ html[data-theme="dark"]
     text-align: left;
   }
 }
+
+.auth-fields-group {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  min-width: 0;
+  display: grid;
+  gap: 18px;
+}
+.auth-field-error {
+  display: block;
+  color: #a83625;
+  font-size: 12px;
+  line-height: 1.5;
+  margin-top: 5px;
+}
+[data-theme="dark"] .auth-field-error {
+  color: #ffb4a2;
+}

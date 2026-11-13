@@ -860,9 +860,6 @@ test("modo autenticado com transporte simulado recarrega eventos e exceções sa
   const mock = await mockAuthenticatedPersistence(page);
   await page.goto(`/?empresa=${mock.companyId}&pagina=feriados&mes=2026-12`);
   await page
-    .getByRole("button", { name: "Entrar com e-mail existente", exact: true })
-    .click();
-  await page
     .getByLabel("E-mail", { exact: true })
     .fill("teste-local@example.invalid");
   await page.getByLabel("Senha", { exact: true }).fill("somente-teste-local");

@@ -38,6 +38,12 @@ import {
 } from "lucide-react";
 import type { User } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabase";
+import {
+  readAuthInput,
+  validateAuthInput,
+  authErrorMessage,
+  type AuthFieldErrors,
+} from "@/lib/auth-email";
 import AuthFields, { UsernameFields, type AuthMode } from "./auth-fields";
 import {
   getOwnUsername,
@@ -387,7 +393,9 @@ export default function Workspace() {
       null,
     ),
     [modal, setModal] = useState<Modal | null>(null),
-    [authMode, setAuthMode] = useState<AuthMode>("login");
+    [authMode, setAuthMode] = useState<AuthMode>("email-login");
+  const [authFieldErrors, setAuthFieldErrors] = useState<AuthFieldErrors>({});
+  useEffect(() => setAuthFieldErrors({}), [authMode]);
   const [accountUsername, setAccountUsername] = useState<string | null>(null);
   const [confirmationPending, setConfirmationPending] = useState(false);
   const [accountUsernameError, setAccountUsernameError] = useState<
@@ -616,14 +624,23 @@ export default function Workspace() {
       return;
     }
     let alive = true;
-    supabase.auth.getSession().then(({ data, error }) => {
-      if (alive) {
-        authUserId.current = data.session?.user.id ?? null;
-        setUser(data.session?.user ?? null);
-        setAuthReady(true);
-        if (error) setToast({ text: error.message, error: true });
-      }
-    });
+    supabase.auth
+      .getSession()
+      .then(({ data, error }) => {
+        if (alive) {
+          authUserId.current = data.session?.user.id ?? null;
+          setUser(data.session?.user ?? null);
+          setAuthReady(true);
+          if (error) setToast({ text: authErrorMessage(error), error: true });
+        }
+      })
+      .catch((error: unknown) => {
+        if (alive) {
+          setUser(null);
+          setAuthReady(true);
+          setToast({ text: authErrorMessage(error), error: true });
+        }
+      });
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((event, session) => {
@@ -660,6 +677,18 @@ export default function Workspace() {
       subscription.unsubscribe();
     };
   }, []);
+  useEffect(() => {
+    if (
+      authReady &&
+      navigationReady &&
+      !user &&
+      !demo &&
+      window.location.pathname !== "/login"
+    ) {
+      window.history.replaceState(null, "", "/login");
+      currentHref.current = "/login";
+    }
+  }, [authReady, navigationReady, user, demo]);
   useEffect(() => {
     if (!user || demo || !navigationReady) return;
     let alive = true;
@@ -1849,27 +1878,20 @@ export default function Workspace() {
     await perform(async () => {
       if (!supabase)
         throw new Error("O Supabase ainda não está conectado a este ambiente.");
-      const email = pick(fd, "email"),
-        password = String(fd.get("password") ?? "");
+      const input = readAuthInput(fd);
+      const errors = validateAuthInput(authMode, input);
+      setAuthFieldErrors(errors);
+      if (Object.keys(errors).length) throw new Error(Object.values(errors)[0]);
+      const { email, password, name } = input;
       const username = normalizeUsername(pick(fd, "username"));
-      if (authMode === "signup") {
-        const invalid = usernameError(username);
-        if (invalid) throw new Error(invalid);
-        const status = await fetch("/api/auth/username", { cache: "no-store" });
-        const availability = await status.json().catch(() => null);
-        if (!status.ok || availability?.available !== true)
-          throw new Error(
-            "A criação de acessos por usuário ainda não está disponível neste ambiente. Entre com uma conta existente ou contate o responsável.",
-          );
-      }
-      const redirect = window.location.origin;
+      const redirect = `${window.location.origin}/login`;
       try {
         const result =
           authMode === "signup"
             ? await supabase.auth.signUp({
                 email,
                 password,
-                options: { emailRedirectTo: redirect, data: { username } },
+                options: { emailRedirectTo: redirect, data: { nome: name } },
               })
             : authMode === "resend"
               ? await supabase.auth.resend({
@@ -1892,6 +1914,24 @@ export default function Workspace() {
         if (result.error) throw result.error;
         const session =
           result.data && "session" in result.data ? result.data.session : null;
+        if (
+          authMode === "signup" &&
+          !session &&
+          result.data &&
+          "user" in result.data &&
+          typeof result.data.user === "object" &&
+          result.data.user !== null &&
+          "identities" in result.data.user &&
+          Array.isArray(result.data.user.identities) &&
+          result.data.user.identities.length === 0
+        ) {
+          setConfirmationPending(false);
+          setAuthMode("email-login");
+          notify(
+            "Se este e-mail já tiver cadastro, entre ou recupere sua senha. Caso contrário, confira as instruções de confirmação no e-mail.",
+          );
+          return;
+        }
         if (authMode === "signup") setConfirmationPending(!session);
         else if (authMode === "login" || authMode === "email-login")
           setConfirmationPending(false);
@@ -1899,7 +1939,7 @@ export default function Workspace() {
           authMode === "signup"
             ? session
               ? "Conta criada. Acesso realizado."
-              : "Cadastro solicitado. Confira seu e-mail para confirmar o acesso; depois entre com seu usuário e senha."
+              : "Cadastro solicitado. Confira seu e-mail para confirmar o acesso; depois entre com e-mail e senha."
             : authMode === "resend"
               ? "Se houver um cadastro pendente para esse e-mail, enviaremos uma nova confirmação. Confira também o spam."
               : authMode === "reset"
@@ -1909,7 +1949,7 @@ export default function Workspace() {
                   : "Acesso realizado.",
         );
         if (authMode === "password" || authMode === "signup")
-          setAuthMode("login");
+          setAuthMode("email-login");
       } catch (error) {
         const code =
           error && typeof error === "object" && "code" in error
@@ -1925,7 +1965,7 @@ export default function Workspace() {
             { cause: error },
           );
         }
-        throw error;
+        throw new Error(authErrorMessage(error), { cause: error });
       }
     });
   }
@@ -2812,19 +2852,20 @@ export default function Workspace() {
               {authMode === "login"
                 ? "Entre com seu usuário e senha para acessar os cadastros e as escalas da sua conta."
                 : authMode === "email-login"
-                  ? "Acesse sua conta existente e defina um usuário em Meu acesso. Seus dados serão mantidos."
+                  ? "Entre com seu e-mail e senha. Seus cadastros e escalas ficam salvos na sua conta."
                   : authMode === "resend"
                     ? "Informe o e-mail usado no cadastro para receber um novo link de ativação."
                     : authMode === "signup"
-                      ? "Cadastre seu usuário e senha. Confirme o e-mail de cadastro para ativar o primeiro acesso."
-                      : "O e-mail é usado apenas no cadastro e na recuperação do acesso."}
+                      ? "Informe seu nome, e-mail e senha para criar uma conta. Confirme o e-mail para ativar o acesso."
+                      : "Use o e-mail da sua conta para continuar."}
             </p>
             {!supabase && (
               <div className="banner mt-6">
                 <AlertTriangle size={18} />
                 <div>
-                  A conexão com o Supabase ainda não foi configurada. Você pode
-                  explorar a demonstração com dados fictícios.
+                  A conexão com o Supabase precisa ser configurada para criar
+                  sua conta e salvar os dados. Consulte as instruções de
+                  instalação.
                 </div>
               </div>
             )}
@@ -2838,11 +2879,12 @@ export default function Workspace() {
                     </h2>
                     <p className="text-sm mt-2">
                       Abra o link enviado ao e-mail de cadastro e volte para
-                      entrar com seu usuário e senha. Confira também o spam.
+                      entrar com e-mail e senha. Confira também o spam.
                     </p>
                     <button
                       type="button"
                       className="button mt-3"
+                      disabled={busy}
                       onClick={() => setAuthMode("resend")}
                     >
                       Reenviar confirmação
@@ -2850,8 +2892,14 @@ export default function Workspace() {
                   </div>
                 </div>
               )}
-            <form onSubmit={authSubmit}>
-              <AuthFields key={authMode} mode={authMode} />
+            <form onSubmit={authSubmit} noValidate aria-busy={busy}>
+              <fieldset disabled={busy} className="auth-fields-group">
+                <AuthFields
+                  key={authMode}
+                  mode={authMode}
+                  errors={authFieldErrors}
+                />
+              </fieldset>
               <button className="button primary" disabled={busy || !supabase}>
                 {busy ? (
                   <LoaderCircle size={16} className="animate-spin" />
@@ -2871,10 +2919,11 @@ export default function Workspace() {
             <div className="actions justify-between mt-5">
               <button
                 className="icon-button text-xs"
+                disabled={busy}
                 onClick={() =>
                   setAuthMode(
                     authMode === "signup" || authMode === "resend"
-                      ? "login"
+                      ? "email-login"
                       : "signup",
                   )
                 }
@@ -2887,8 +2936,9 @@ export default function Workspace() {
               </button>
               <button
                 className="icon-button text-xs"
+                disabled={busy}
                 onClick={() =>
-                  setAuthMode(authMode === "reset" ? "login" : "reset")
+                  setAuthMode(authMode === "reset" ? "email-login" : "reset")
                 }
               >
                 {authMode === "reset"
@@ -2901,6 +2951,7 @@ export default function Workspace() {
                 <button
                   type="button"
                   className="icon-button text-xs mt-3"
+                  disabled={busy}
                   onClick={() => setAuthMode("resend")}
                 >
                   Reenviar confirmação
@@ -2910,49 +2961,16 @@ export default function Workspace() {
               <button
                 type="button"
                 className="button mt-4 w-full"
+                disabled={busy}
                 onClick={() =>
                   setAuthMode(authMode === "login" ? "email-login" : "login")
                 }
               >
                 {authMode === "login"
                   ? "Entrar com e-mail existente"
-                  : "Voltar ao usuário e senha"}
+                  : "Entrar com usuário existente"}
               </button>
             )}
-            <div className="login-demo mt-7 border-t pt-6">
-              <button
-                className="button w-full"
-                onClick={() => {
-                  setCompanyScopeId(null);
-                  setDetailEmployeeId(null);
-                  setConfirmation(null);
-                  setCompanyId("");
-                  setEmployeeId("");
-                  setModelId("");
-                  setDraft(null);
-                  setDirty(false);
-                  setPage("inicio");
-                  setCompanyAudit({
-                    companyId: "",
-                    logs: [],
-                    loading: false,
-                    hasMore: false,
-                  });
-                  setData(demoData());
-                  setDataLoaded(true);
-                  setDataLoadError(null);
-                  setScheduleView("individual");
-                  setMonth("2026-12");
-                  setDemo(true);
-                  setAuthMode("login");
-                }}
-              >
-                Explorar demonstração <ArrowUpRight size={15} />
-              </button>
-              <p className="subtitle text-center text-[11px]">
-                Dados fictícios. As alterações não são salvas após sair.
-              </p>
-            </div>
           </div>
         </section>
         {confirmation && (
@@ -2979,7 +2997,11 @@ export default function Workspace() {
           </Dialog>
         )}
         {toast && (
-          <div className={`toast ${toast.error ? "error" : ""}`} role="status">
+          <div
+            className={`toast ${toast.error ? "error" : ""}`}
+            role={toast.error ? "alert" : "status"}
+            aria-live={toast.error ? "assertive" : "polite"}
+          >
             {toast.text}
             <button onClick={() => setToast(null)} aria-label="Fechar mensagem">
               <X size={16} />
@@ -3066,7 +3088,11 @@ export default function Workspace() {
           <div className="avatar">DP</div>
           <div className="min-w-0">
             <div className="truncate">
-              {demo ? "Modo demonstração" : (accountUsername ?? "Minha conta")}
+              {demo
+                ? "Modo demonstração"
+                : typeof user?.user_metadata?.nome === "string"
+                  ? user.user_metadata.nome
+                  : (accountUsername ?? user?.email ?? "Minha conta")}
             </div>
             <small className="profile-caption">
               {demo ? "Dados fictícios" : "Área de acesso privado"}
@@ -3088,7 +3114,8 @@ export default function Workspace() {
                   return;
                 if (!demo && supabase) {
                   const { error } = await supabase.auth.signOut();
-                  if (error) throw error;
+                  if (error)
+                    throw new Error(authErrorMessage(error), { cause: error });
                 }
                 if (localOwner)
                   await clearOwnerDrafts(localOwner).catch(() => {});
@@ -3118,7 +3145,8 @@ export default function Workspace() {
                 setDraft(null);
                 setDirty(false);
                 setPage("inicio");
-                window.history.replaceState(null, "", "/");
+                setAuthMode("email-login");
+                window.history.replaceState(null, "", "/login");
               })
             }
           >
@@ -3191,20 +3219,6 @@ export default function Workspace() {
           </div>
         </header>
         <div className="content">
-          {!demo && user && !accountUsername && (
-            <div className="banner neutral" role="status">
-              <div>
-                <strong>Use um usuário e sua senha atual.</strong>
-                <p>
-                  {accountUsernameError ??
-                    "Defina seu nome de usuário em Meu acesso. Seus cadastros continuam nesta mesma conta."}
-                </p>
-                <button className="button small" onClick={() => edit("acesso")}>
-                  Definir meu usuário
-                </button>
-              </div>
-            </div>
-          )}
           {(rawData.schemaWarnings ?? []).map((message) => (
             <div className="banner" role="status" key={message}>
               {message}
@@ -3291,12 +3305,12 @@ export default function Workspace() {
                     setEmployeeId("");
                     setModelId("");
                     setDetailEmployeeId(null);
-                    setAuthMode("login");
+                    setAuthMode("email-login");
                     setPage("empresas");
                     setDemo(false);
                     commitReadbackPending.current = false;
                     setReadbackPending(false);
-                    window.history.replaceState(null, "", "/");
+                    window.history.replaceState(null, "", "/login");
                   })
                 }
               >
@@ -5302,7 +5316,14 @@ export default function Workspace() {
           >
             <div className="form-grid">
               {modal.kind === "acesso" && (
-                <UsernameFields username={accountUsername} />
+                <>
+                  <UsernameFields username={accountUsername} />
+                  {accountUsernameError && (
+                    <p role="alert" className="auth-field-error">
+                      {accountUsernameError}
+                    </p>
+                  )}
+                </>
               )}
               {modal.kind === "empresa" && (
                 <CompanyFields
@@ -5567,7 +5588,11 @@ export default function Workspace() {
         </Dialog>
       )}
       {toast && (
-        <div className={`toast ${toast.error ? "error" : ""}`} role="status">
+        <div
+          className={`toast ${toast.error ? "error" : ""}`}
+          role={toast.error ? "alert" : "status"}
+          aria-live={toast.error ? "assertive" : "polite"}
+        >
           {toast.text}
           <button aria-label="Fechar mensagem" onClick={() => setToast(null)}>
             <X size={16} />

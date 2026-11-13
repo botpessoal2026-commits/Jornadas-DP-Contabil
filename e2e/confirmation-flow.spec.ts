@@ -98,6 +98,9 @@ test("login pendente mantém orientação e reenvio usa somente o e-mail informa
 }) => {
   const db = await pendingBackend(page);
   await page.goto("/");
+  await page
+    .getByRole("button", { name: "Entrar com usuário existente", exact: true })
+    .click();
   await page.getByLabel("Usuário", { exact: true }).fill("ANDRE.TESTE");
   await page.getByLabel("Senha", { exact: true }).fill(password);
   await page.getByRole("button", { name: "Entrar", exact: true }).click();
@@ -143,13 +146,13 @@ test("login pendente mantém orientação e reenvio usa somente o e-mail informa
     expect(db.resends[0].body).not.toHaveProperty(key);
   const resendUrl = new URL(db.resends[0].url);
   expect(resendUrl.searchParams.get("redirect_to")).toBe(
-    new URL(page.url()).origin,
+    `${new URL(page.url()).origin}/login`,
   );
   await expectSignedOut(page);
   await page
     .getByRole("button", { name: "Voltar ao login", exact: true })
     .click();
-  await expect(page.getByLabel("Usuário", { exact: true })).toBeVisible();
+  await expect(page.getByLabel("E-mail", { exact: true })).toBeVisible();
   await expect(page.getByLabel("Senha", { exact: true })).toHaveAttribute(
     "type",
     "password",
@@ -163,11 +166,10 @@ test("cadastro sem sessão mostra confirmação persistente e preserva a senha e
   const db = await pendingBackend(page);
   await page.goto("/");
   await page.getByRole("button", { name: "Criar conta", exact: true }).click();
-  await page.getByLabel("Usuário", { exact: true }).fill("NOVA.CONTA");
-  await page
-    .getByLabel("E-mail para recuperação", { exact: true })
-    .fill("nova@example.invalid");
+  await page.getByLabel("Nome", { exact: true }).fill("Nova Conta");
+  await page.getByLabel("E-mail", { exact: true }).fill("nova@example.invalid");
   await page.getByLabel("Senha", { exact: true }).fill(password);
+  await page.getByLabel("Confirmar senha", { exact: true }).fill(password);
   await page.getByRole("button", { name: "Criar conta", exact: true }).click();
   const banner = page.getByRole("heading", {
     name: pendingMessage,
@@ -179,14 +181,14 @@ test("cadastro sem sessão mostra confirmação persistente e preserva a senha e
   expect(db.signups[0]).toMatchObject({
     email: "nova@example.invalid",
     password,
-    data: { username: "nova.conta" },
+    data: { nome: "Nova Conta" },
   });
   expect(db.resends).toEqual([]);
   await page
     .getByRole("button", { name: "Fechar mensagem", exact: true })
     .click();
   await expect(banner).toBeVisible();
-  await expect(page.getByLabel("Usuário", { exact: true })).toBeVisible();
+  await expect(page.getByLabel("E-mail", { exact: true })).toBeVisible();
   expect(db.unexpected).toEqual([]);
 });
 
@@ -195,9 +197,6 @@ test("acesso legado também explica confirmação pendente sem alterar senha ou 
 }) => {
   const db = await pendingBackend(page);
   await page.goto("/");
-  await page
-    .getByRole("button", { name: "Entrar com e-mail existente", exact: true })
-    .click();
   await page
     .getByLabel("E-mail", { exact: true })
     .fill("legado@example.invalid");

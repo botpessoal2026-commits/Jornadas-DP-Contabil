@@ -2,7 +2,7 @@ import { test, expect, type Page } from "@playwright/test";
 
 async function openNewModel(page: Page) {
   await page.goto("/");
-  await page.getByRole("button", { name: "Explorar demonstração" }).click();
+  await page.goto("/demonstracao");
   await page
     .getByRole("button", { name: "Modelos de jornada", exact: true })
     .click();

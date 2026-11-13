@@ -2,6 +2,7 @@
 
 import { useId, useState } from "react";
 import { Eye, EyeOff } from "lucide-react";
+import type { AuthFieldErrors } from "@/lib/auth-email";
 import { usernameError } from "@/lib/auth-username";
 
 export type AuthMode =
@@ -47,7 +48,13 @@ function UsernameField({
   );
 }
 
-function PasswordField({ newPassword }: { newPassword: boolean }) {
+function PasswordField({
+  newPassword,
+  error,
+}: {
+  newPassword: boolean;
+  error?: string;
+}) {
   const id = useId();
   const [visible, setVisible] = useState(false);
   const action = visible ? "Ocultar senha" : "Mostrar senha";
@@ -58,6 +65,8 @@ function PasswordField({ newPassword }: { newPassword: boolean }) {
         <input
           id={`${id}-password`}
           name="password"
+          aria-invalid={Boolean(error)}
+          aria-describedby={error ? `${id}-password-error` : undefined}
           type={visible ? "text" : "password"}
           required
           minLength={newPassword ? 8 : undefined}
@@ -85,24 +94,65 @@ function PasswordField({ newPassword }: { newPassword: boolean }) {
           )}
         </button>
       </div>
+      {error && (
+        <span
+          id={`${id}-password-error`}
+          className="auth-field-error"
+          role="alert"
+        >
+          {error}
+        </span>
+      )}
     </div>
   );
 }
 
 /** Fields only: the parent keeps submit, account state and error handling. */
-export default function AuthFields({ mode }: { mode: AuthMode }) {
+export default function AuthFields({
+  mode,
+  errors = {},
+}: {
+  mode: AuthMode;
+  errors?: AuthFieldErrors;
+}) {
   const id = useId();
   const newPassword = mode === "signup" || mode === "password";
   return (
     <>
-      {(mode === "login" || mode === "signup") && <UsernameField key={mode} />}
+      {mode === "login" && <UsernameField key={mode} />}
+      {mode === "signup" && (
+        <div className="auth-field">
+          <label htmlFor={`${id}-name`}>
+            Nome
+            <input
+              id={`${id}-name`}
+              name="name"
+              required
+              maxLength={120}
+              autoComplete="name"
+              placeholder="Seu nome"
+              aria-invalid={Boolean(errors.name)}
+              aria-describedby={errors.name ? `${id}-name-error` : undefined}
+            />
+          </label>
+          {errors.name && (
+            <span
+              id={`${id}-name-error`}
+              className="auth-field-error"
+              role="alert"
+            >
+              {errors.name}
+            </span>
+          )}
+        </div>
+      )}
       {(mode === "email-login" ||
         mode === "signup" ||
         mode === "reset" ||
         mode === "resend") && (
         <div className="auth-field">
           <label htmlFor={`${id}-email`}>
-            {mode === "signup" ? "E-mail para recuperação" : "E-mail"}
+            E-mail
             <input
               key={mode}
               id={`${id}-email`}
@@ -115,21 +165,72 @@ export default function AuthFields({ mode }: { mode: AuthMode }) {
               autoCorrect="off"
               spellCheck={false}
               placeholder="voce@contabilidade.com.br"
+              aria-invalid={Boolean(errors.email)}
               aria-describedby={
-                mode === "signup" ? `${id}-email-hint` : undefined
+                errors.email
+                  ? `${id}-email-error`
+                  : mode === "signup"
+                    ? `${id}-email-hint`
+                    : undefined
               }
             />
           </label>
+          {errors.email && (
+            <span
+              id={`${id}-email-error`}
+              className="auth-field-error"
+              role="alert"
+            >
+              {errors.email}
+            </span>
+          )}
           {mode === "signup" && (
             <span id={`${id}-email-hint`} className="muted font-normal">
-              Usado para confirmar a conta e recuperar a senha. Para entrar no
-              dia a dia, use seu usuário.
+              Usado para entrar, confirmar a conta e recuperar a senha.
             </span>
           )}
         </div>
       )}
       {mode !== "reset" && mode !== "resend" && (
-        <PasswordField key={mode} newPassword={newPassword} />
+        <>
+          <PasswordField
+            key={mode}
+            newPassword={newPassword}
+            error={errors.password}
+          />
+          {newPassword && (
+            <div className="auth-field">
+              <label htmlFor={`${id}-confirm`}>
+                Confirmar senha
+                <input
+                  id={`${id}-confirm`}
+                  name="confirmPassword"
+                  type="password"
+                  required
+                  minLength={8}
+                  maxLength={1024}
+                  autoComplete="new-password"
+                  autoCapitalize="none"
+                  autoCorrect="off"
+                  spellCheck={false}
+                  aria-invalid={Boolean(errors.confirmPassword)}
+                  aria-describedby={
+                    errors.confirmPassword ? `${id}-confirm-error` : undefined
+                  }
+                />
+              </label>
+              {errors.confirmPassword && (
+                <span
+                  id={`${id}-confirm-error`}
+                  className="auth-field-error"
+                  role="alert"
+                >
+                  {errors.confirmPassword}
+                </span>
+              )}
+            </div>
+          )}
+        </>
       )}
     </>
   );
