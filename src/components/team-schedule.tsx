@@ -10,6 +10,7 @@ import { addDays, dateUTC, monday, monthDates } from "@/lib/engine";
 import type { Data } from "@/lib/store";
 import type { Employee } from "@/lib/types";
 import WorkRestReport from "./work-rest-report";
+import CompanyCoverage from "./company-coverage";
 import {
   filterTeamRows,
   teamScheduleRows,
@@ -357,6 +358,9 @@ export default function TeamSchedule({
             Limpar filtros da equipe
           </button>
         </div>
+      </div>
+      <div className="panel-body border-t">
+        <CompanyCoverage data={data} companyId={companyId} month={month} />
       </div>
       <details
         className="panel-body border-t"

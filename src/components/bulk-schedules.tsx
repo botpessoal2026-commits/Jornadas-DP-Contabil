@@ -6,6 +6,7 @@ import { applyBulkDayChanges, reviewBulkSchedules } from "@/lib/schedule-bulk";
 import { validateShiftText } from "@/lib/shift-editor";
 import type { Data } from "@/lib/store";
 import type { Schedule } from "@/lib/types";
+import CompanyCoverage from "./company-coverage";
 
 type BulkSchedulesProps = {
   data: Data;
@@ -508,6 +509,13 @@ export default function BulkSchedules({
                 </tbody>
               </table>
             </div>
+            <CompanyCoverage
+              data={data}
+              companyId={companyId}
+              month={targetMonth}
+              schedules={schedules}
+              defaultOpen
+            />
             <details className="mt-5 rounded-lg border border-[#dbe5f1] p-4">
               <summary className="font-semibold">
                 Editar dias das prévias em lote

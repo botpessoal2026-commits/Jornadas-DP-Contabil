@@ -5,6 +5,11 @@ export type Shift = {
   endDay?: number;
 };
 export type WeekPattern = Record<string, Shift[]>;
+export type BusinessHours = {
+  semana: WeekPattern;
+  minimo_funcionarios: number;
+  feriados: "fechado" | "seguir_semana";
+};
 export type Company = {
   id: string;
   nome: string;
@@ -16,6 +21,7 @@ export type Company = {
   limite_diario_minutos: number | null;
   usa_banco_horas: boolean;
   folgar_feriados?: boolean;
+  horario_funcionamento?: BusinessHours | null;
   nome_fantasia?: string;
   codigo_interno?: string;
   situacao?: "ativa" | "inativa" | "arquivada";

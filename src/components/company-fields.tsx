@@ -1,5 +1,6 @@
 import type { Company, Model } from "@/lib/types";
 import { modelsForCompany } from "@/lib/company-resources";
+import BusinessHoursFields from "./business-hours-fields";
 
 export default function CompanyFields({
   company,
@@ -124,6 +125,7 @@ export default function CompanyFields({
           defaultValue={company?.contato ?? ""}
         />
       </label>
+      <BusinessHoursFields value={company?.horario_funcionamento} />
       <label>
         Modelo padrão da empresa
         <select

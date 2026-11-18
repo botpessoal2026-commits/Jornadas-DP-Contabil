@@ -144,6 +144,7 @@ import {
 } from "@/lib/rest-rotation";
 import { reviewBulkSchedules } from "@/lib/schedule-bulk";
 import { saveRestRotation } from "@/lib/store";
+import { businessHoursFromForm } from "@/lib/business-hours";
 import WorkQueue from "./work-queue";
 import {
   resolvePublishedContext,
@@ -2027,6 +2028,7 @@ export default function Workspace() {
         return;
       }
       if (modal.kind === "empresa") {
+        const opening = businessHoursFromForm(fd.get("horario_funcionamento"));
         const cnpj = pick(fd, "cnpj").replace(/\D/g, "");
         if (cnpj && !cnpjValid(cnpj))
           throw new Error("Informe um CNPJ válido com 14 dígitos.");
@@ -2058,6 +2060,9 @@ export default function Workspace() {
               : null,
             usa_banco_horas: fd.has("banco"),
             folgar_feriados: fd.has("folgar_feriados"),
+            ...(opening || modal.row?.horario_funcionamento
+              ? { horario_funcionamento: opening }
+              : {}),
           },
           id,
         );

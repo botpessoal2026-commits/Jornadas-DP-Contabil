@@ -24,6 +24,7 @@ import {
   type CompanyView,
 } from "@/lib/company-context";
 import { formatMinutes } from "@/lib/engine";
+import { businessHoursLabel } from "@/lib/business-hours";
 
 export type { CompanyView } from "@/lib/company-context";
 
@@ -422,6 +423,19 @@ export default function CompanyAdmin({
                     : "Não definida"}
                 </dd>
               </div>
+              <div>
+                <dt>Horário de funcionamento</dt>
+                <dd>{businessHoursLabel(company.horario_funcionamento)}</dd>
+              </div>
+              {company.horario_funcionamento && (
+                <div>
+                  <dt>Cobertura mínima durante o funcionamento</dt>
+                  <dd>
+                    {company.horario_funcionamento.minimo_funcionarios}{" "}
+                    funcionário(s)
+                  </dd>
+                </div>
+              )}
               <div>
                 <dt>Modelo padrão</dt>
                 <dd>

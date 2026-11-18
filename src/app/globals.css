@@ -2820,6 +2820,63 @@ html[data-theme="dark"]
   grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr));
   gap: 12px;
 }
+
+.business-hours-fields {
+  border: 1px solid var(--border, #dbe5f1);
+  border-radius: 12px;
+  padding: 16px;
+  min-width: 0;
+}
+.business-hours-fields legend {
+  font-weight: 700;
+  padding: 0 6px;
+}
+.business-hours-week {
+  display: grid;
+  gap: 12px;
+}
+.business-hours-day {
+  display: grid;
+  grid-template-columns: minmax(140px, 1fr) minmax(0, 3fr);
+  gap: 16px;
+  border-top: 1px solid var(--border, #dbe5f1);
+  padding-top: 12px;
+}
+.business-hours-period {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.business-hours-period .check-label {
+  grid-column: 1 / -1;
+}
+.company-coverage {
+  min-width: 0;
+  border: 1px solid var(--border, #dbe5f1);
+  border-radius: 12px;
+  padding: 14px;
+}
+.coverage-days {
+  display: grid;
+  gap: 10px;
+  max-height: 520px;
+  overflow: auto;
+}
+.coverage-days ul {
+  padding-left: 18px;
+  list-style: disc;
+}
+.coverage-days li {
+  margin: 6px 0;
+  overflow-wrap: anywhere;
+}
+@media (max-width: 600px) {
+  .business-hours-day,
+  .business-hours-period {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
 @media (max-width: 600px) {
   .rotation-person {
     grid-template-columns: minmax(0, 1fr);

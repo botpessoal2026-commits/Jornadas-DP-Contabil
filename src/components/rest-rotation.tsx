@@ -13,6 +13,7 @@ import {
   type RotationPlan,
 } from "@/lib/rest-rotation";
 import { workRestDate } from "@/lib/work-rest-report";
+import CompanyCoverage from "./company-coverage";
 
 export default function RestRotation({
   data,
@@ -370,6 +371,13 @@ export default function RestRotation({
                 </tbody>
               </table>
             </div>
+            <CompanyCoverage
+              data={rotationData(data, plan)}
+              companyId={companyId}
+              month={month}
+              schedules={plan.schedules}
+              defaultOpen
+            />
             <details className="mt-4">
               <summary>Ver quem trabalha e quem folga em cada dia</summary>
               <p className="muted mt-3">

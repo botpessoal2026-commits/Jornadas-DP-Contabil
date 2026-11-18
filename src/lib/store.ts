@@ -16,6 +16,7 @@ import type { ScheduleVersion } from "./schedule-governance";
 import { initialHolidays, initialModels, initialRules } from "./presets";
 import { missingReferenceRules } from "./legal-reference";
 import { rotationPayload, type RotationPlan } from "./rest-rotation";
+import { businessHoursPersistenceError } from "./business-hours";
 export type AuditLog = {
   id: string;
   tabela: string;
@@ -247,7 +248,13 @@ export async function saveRow(table: string, value: object, id?: string) {
     ? supabase.from(table).update(value).eq("id", id)
     : supabase.from(table).insert(value);
   const { data, error } = await q.select("id").single();
-  if (error) throw new Error(error.message);
+  if (error)
+    throw new Error(
+      businessHoursPersistenceError(
+        error,
+        table === "empresas" && "horario_funcionamento" in value,
+      ),
+    );
   return data.id as string;
 }
 /** The SQL RPC validates both the record and payload against this context. */
@@ -264,7 +271,13 @@ export async function saveCompanyRow(
     p_valores: value,
     p_id: id ?? null,
   });
-  if (error) throw new Error(error.message);
+  if (error)
+    throw new Error(
+      businessHoursPersistenceError(
+        error,
+        table === "empresas" && "horario_funcionamento" in value,
+      ),
+    );
   return data as string;
 }
 
