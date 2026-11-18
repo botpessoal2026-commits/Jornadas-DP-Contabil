@@ -15,6 +15,7 @@ import type { CompanyOperation } from "./company-operations";
 import type { ScheduleVersion } from "./schedule-governance";
 import { initialHolidays, initialModels, initialRules } from "./presets";
 import { missingReferenceRules } from "./legal-reference";
+import { rotationPayload, type RotationPlan } from "./rest-rotation";
 export type AuditLog = {
   id: string;
   tabela: string;
@@ -313,6 +314,31 @@ export async function saveSchedules(
       })
     : await supabase.rpc("salvar_escalas", { itens });
   if (error) throw new Error(error.message);
+}
+export async function saveRestRotation(plan: RotationPlan) {
+  if (!supabase) throw new Error("Supabase não configurado.");
+  const { error } = await supabase.rpc(
+    "salvar_revezamento_12x36",
+    rotationPayload(plan),
+  );
+  if (error) {
+    if (migrationError(error))
+      throw new Error(
+        "Revezamento ainda não ativado no banco: execute a migration 202611180001_rest_rotation.sql no Supabase. Nenhum cadastro foi alterado.",
+      );
+    if (error.code === "P0001") throw new Error(error.message);
+    if (error.code === "42501")
+      throw new Error(
+        "Sua conta não tem permissão para salvar este revezamento.",
+      );
+    if (error.code === "23505")
+      throw new Error(
+        "Há um conflito com dados já salvos. Atualize a página antes de tentar novamente.",
+      );
+    throw new Error(
+      "Não foi possível salvar o revezamento. Confira a conexão e atualize os dados antes de tentar novamente.",
+    );
+  }
 }
 export async function transitionScheduleStatus(
   companyId: string,
