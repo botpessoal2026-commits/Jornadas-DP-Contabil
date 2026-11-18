@@ -4,6 +4,8 @@ Para **contas reais por e-mail e dados persistentes**, siga [o passo a passo de 
 
 Para **relatório de dias trabalhados e folgas** e **revezamento 12×36 em grupos A/B**, veja [o guia de uso e a migration incremental](docs/DIAS_FOLGAS_REVEZAMENTO.md).
 
+Para **gerar a equipe inteira**, cadastrar **horários de funcionamento** e conferir **cobertura e revezamento automático**, siga [PLANEJAMENTO_EQUIPE.md](docs/PLANEJAMENTO_EQUIPE.md). A ativação no banco existente está reunida em `supabase/setup/ativar-planejamento-equipe.sql`.
+
 Aplicação em português para o Departamento Pessoal organizar empresas, funcionários e escalas mensais. Next.js App Router, TypeScript, Tailwind e Supabase Auth/Postgres/RLS. Exporta PDF para conferência e assinatura, XLSX e CSV.
 
 ## Situação da entrega

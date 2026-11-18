@@ -143,7 +143,14 @@ import {
   type RotationPlan,
 } from "@/lib/rest-rotation";
 import { reviewBulkSchedules } from "@/lib/schedule-bulk";
-import { saveRestRotation } from "@/lib/store";
+import { saveRestRotation, saveTeamGeneration } from "@/lib/store";
+import {
+  automaticTeamRotation,
+  teamPlanningSelection,
+  applyTeamGenerationLocally,
+  type TeamGenerationOptions,
+  type TeamGeneration,
+} from "@/lib/team-planning";
 import { businessHoursFromForm } from "@/lib/business-hours";
 import WorkQueue from "./work-queue";
 import {
@@ -2498,13 +2505,34 @@ export default function Workspace() {
     ids: string[],
     targetMonth: string,
     copy = false,
-  ): Promise<Schedule[]> {
+    options?: TeamGenerationOptions,
+  ): Promise<Schedule[] | TeamGeneration> {
     if (!company || readbackPending)
       throw new Error("Escolha uma empresa e atualize seus dados.");
-    const expected = activeDataContext.current,
-      results: Schedule[] = [];
+    const expected = activeDataContext.current;
+    teamPlanningSelection(
+      data,
+      company.id,
+      ids,
+      targetMonth,
+      copy ? month : undefined,
+    );
+    const rotation =
+      !copy && options?.rotate12
+        ? automaticTeamRotation(
+            data,
+            company.id,
+            targetMonth,
+            ids,
+            options.reference,
+          )
+        : undefined;
+    const results: Schedule[] = [...(rotation?.schedules ?? [])];
+    const rotated = new Set(
+      rotation?.assignments.map((item) => item.employeeId) ?? [],
+    );
     const owned = new Map<string, Model>();
-    for (const id of ids) {
+    for (const id of ids.filter((employeeId) => !rotated.has(employeeId))) {
       const person = data.employees.find(
         (e) => e.id === id && e.empresa_id === company.id,
       );
@@ -2554,7 +2582,51 @@ export default function Workspace() {
       }
       results.push(next);
     }
-    return results;
+    return rotation ? { schedules: results, rotation } : results;
+  }
+  async function persistTeamPlanning(
+    items: Schedule[],
+    rotation?: RotationPlan,
+  ) {
+    if (!rotation) return persistSchedules(items);
+    if (readbackPending || commitReadbackPending.current)
+      throw new Error("Atualize os dados antes de salvar outro planejamento.");
+    if (
+      !companyScopeId ||
+      rotation.companyId !== companyScopeId ||
+      items.some((item) => item.empresa_id !== companyScopeId)
+    )
+      throw new Error("O planejamento deve pertencer à empresa ativa.");
+    const expected = activeDataContext.current;
+    const review = reviewBulkSchedules(rotationData(data, rotation), items);
+    if (review.some((item) => item.error))
+      throw new Error(
+        "Confira os dados de todas as prévias antes de salvar o lote.",
+      );
+    for (const item of items) {
+      const previous = rawData.schedules.find(
+        (old) =>
+          old.empresa_id === item.empresa_id &&
+          old.funcionario_id === item.funcionario_id &&
+          old.mes.slice(0, 7) === item.mes.slice(0, 7),
+      );
+      if (previous && isScheduleLocked(previous))
+        throw new Error(
+          "Reabra as escalas bloqueadas antes de substituir o lote.",
+        );
+    }
+    if (demo)
+      setData((current) =>
+        applyTeamGenerationLocally(current, items, rotation),
+      );
+    else {
+      await saveTeamGeneration(items, rotation);
+      commitReadbackPending.current = true;
+      if (!(await refreshAfterCommit(expected, "Gravação da equipe")))
+        return false;
+    }
+    assertDataContext(expected);
+    return true;
   }
   async function persistRestRotation(plan: RotationPlan) {
     if (readbackPending || commitReadbackPending.current)
@@ -3729,6 +3801,31 @@ export default function Workspace() {
                   </div>
                 </div>
               </div>
+              <div className="actions mb-4 team-generation-entry">
+                <button
+                  type="button"
+                  className="button primary"
+                  onClick={() => {
+                    const section = document.getElementById(
+                      "team-bulk-generator",
+                    ) as HTMLDetailsElement | null;
+                    if (section) {
+                      section.open = true;
+                      section.scrollIntoView({
+                        block: "start",
+                        behavior: "smooth",
+                      });
+                      section.querySelector("summary")?.focus();
+                    }
+                  }}
+                >
+                  Gerar escalas da equipe
+                </button>
+                <p className="muted">
+                  Gere todos os funcionários ativos ou uma seleção, confira o
+                  funcionamento e salve em uma única operação.
+                </p>
+              </div>
               <details className="panel mb-5">
                 <summary className="panel-body font-semibold">
                   Revezar folgas 12×36 — grupos A e B
@@ -3745,27 +3842,34 @@ export default function Workspace() {
                   }
                 />
               </details>
-              <details className="panel mb-4">
+              <details className="panel mb-4" id="team-bulk-generator">
                 <summary className="panel-head">
                   Gerar, editar e duplicar escalas em lote
                 </summary>
                 <div className="panel-body">
                   <BulkSchedules
-                    key={`${companyScopeId ?? companyId}:${bulkEpoch}`}
+                    key={`${companyScopeId}:${bulkEpoch}`}
                     data={data}
-                    companyId={companyScopeId ?? companyId}
+                    companyId={companyScopeId}
                     month={month}
-                    busy={busy}
+                    busy={busy || readbackPending}
                     onDirtyChange={setBulkDirty}
-                    onGenerate={(ids, target) =>
-                      scopedAction(() => generateBulk(ids, target))
+                    onGenerate={(ids, target, options) =>
+                      scopedAction(() =>
+                        generateBulk(ids, target, false, options),
+                      )
                     }
                     onDuplicate={(ids, target) =>
-                      scopedAction(() => generateBulk(ids, target, true))
-                    }
-                    onSave={(items) =>
                       scopedAction(async () => {
-                        const ok = await persistSchedules(items);
+                        const result = await generateBulk(ids, target, true);
+                        return Array.isArray(result)
+                          ? result
+                          : result.schedules;
+                      })
+                    }
+                    onSave={(items, rotation) =>
+                      scopedAction(async () => {
+                        const ok = await persistTeamPlanning(items, rotation);
                         if (!ok) return;
                         notify(
                           `${items.length} escala(s) salva(s) como rascunho.`,

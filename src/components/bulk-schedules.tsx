@@ -7,14 +7,24 @@ import { validateShiftText } from "@/lib/shift-editor";
 import type { Data } from "@/lib/store";
 import type { Schedule } from "@/lib/types";
 import CompanyCoverage from "./company-coverage";
+import { rotationData, type RotationPlan } from "@/lib/rest-rotation";
+import {
+  rotationForTeamSchedules,
+  type TeamGeneration,
+  type TeamGenerationOptions,
+} from "@/lib/team-planning";
 
 type BulkSchedulesProps = {
   data: Data;
   companyId: string | null;
   month: string;
-  onGenerate: (employeeIds: string[], month: string) => Promise<Schedule[]>;
+  onGenerate: (
+    employeeIds: string[],
+    month: string,
+    options?: TeamGenerationOptions,
+  ) => Promise<Schedule[] | TeamGeneration>;
   onDuplicate?: (employeeIds: string[], month: string) => Promise<Schedule[]>;
-  onSave: (schedules: Schedule[]) => Promise<void>;
+  onSave: (schedules: Schedule[], rotation?: RotationPlan) => Promise<void>;
   onExport?: (schedules: Schedule[]) => Promise<void>;
   onDirtyChange?: (dirty: boolean) => void;
   busy?: boolean;
@@ -43,6 +53,8 @@ export default function BulkSchedules({
   busy = false,
 }: BulkSchedulesProps) {
   const [query, setQuery] = useState("");
+  const [autoRotation, setAutoRotation] = useState(false);
+  const [rotationReference, setRotationReference] = useState(`${month}-01`);
   const [sector, setSector] = useState("");
   const [unit, setUnit] = useState("");
   const [selection, setSelection] = useState<string[]>([]);
@@ -50,6 +62,7 @@ export default function BulkSchedules({
   const [preview, setPreview] = useState<{
     context: string;
     schedules: Schedule[];
+    rotation?: RotationPlan;
   } | null>(null);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState("");
@@ -82,12 +95,18 @@ export default function BulkSchedules({
   );
   const allowed = new Set(candidates.map((employee) => employee.id));
   const selected = selection.filter((id) => allowed.has(id));
-  const selectionKey = [...selected].sort().join(",");
-  const context = `${companyId}:${targetMonth}:${selectionKey}`;
+  const contextFor = (ids: string[]) =>
+    `${companyId}:${targetMonth}:${[...ids].sort().join(",")}:${autoRotation}:${rotationReference}`;
+  const context = contextFor(selected);
   const activeContext = useRef(context);
   activeContext.current = context;
   const schedules =
     preview?.context === context ? preview.schedules : noSchedules;
+  const rotation = preview?.context === context ? preview.rotation : undefined;
+  const reviewData = useMemo(
+    () => (rotation ? rotationData(data, rotation) : data),
+    [data, rotation],
+  );
   const hasPreview = schedules.length > 0;
   const dirtyCallback = useRef(onDirtyChange);
   dirtyCallback.current = onDirtyChange;
@@ -105,8 +124,8 @@ export default function BulkSchedules({
     return () => window.removeEventListener("beforeunload", warn);
   }, [hasPreview]);
   const review = useMemo(
-    () => (schedules.length ? reviewBulkSchedules(data, schedules) : []),
-    [data, schedules],
+    () => (schedules.length ? reviewBulkSchedules(reviewData, schedules) : []),
+    [reviewData, schedules],
   );
   const queryText = searchValue(query);
   const filtered = candidates.filter(
@@ -143,17 +162,26 @@ export default function BulkSchedules({
     { violations: 0, attention: 0, pending: 0, errors: 0 },
   );
 
-  async function generate(mode: "generate" | "duplicate") {
-    if (locked || !company || !selected.length || !validMonth) return;
-    const expected = context;
+  async function generate(mode: "generate" | "duplicate", chosen = selected) {
+    if (locked || !company || !chosen.length || !validMonth) return;
+    const expected = contextFor(chosen);
+    activeContext.current = expected;
     const id = ++request.current;
     setPending(true);
     setError("");
     setMessage("");
     try {
-      const items = await (
-        mode === "duplicate" && onDuplicate ? onDuplicate : onGenerate
-      )(selected, targetMonth);
+      const generated =
+        mode === "duplicate" && onDuplicate
+          ? await onDuplicate(chosen, targetMonth)
+          : await onGenerate(chosen, targetMonth, {
+              rotate12: autoRotation,
+              reference: rotationReference,
+            });
+      const items = Array.isArray(generated) ? generated : generated.schedules;
+      const nextRotation = Array.isArray(generated)
+        ? undefined
+        : generated.rotation;
       if (request.current !== id || activeContext.current !== expected) return;
       if (!items.length)
         throw new Error(
@@ -163,13 +191,20 @@ export default function BulkSchedules({
         items.some(
           (item) =>
             item.empresa_id !== companyId ||
-            !selected.includes(item.funcionario_id) ||
+            !chosen.includes(item.funcionario_id) ||
             item.mes.slice(0, 7) !== targetMonth,
         )
       )
         throw new Error("O resultado não corresponde à seleção deste lote.");
-      reviewBulkSchedules(data, items);
-      setPreview({ context: expected, schedules: items });
+      reviewBulkSchedules(
+        nextRotation ? rotationData(data, nextRotation) : data,
+        items,
+      );
+      setPreview({
+        context: expected,
+        schedules: items,
+        rotation: nextRotation,
+      });
       setHistory([]);
       setFuture([]);
       setConfirmed(false);
@@ -211,7 +246,7 @@ export default function BulkSchedules({
       );
       setHistory((current) => [...current.slice(-19), schedules]);
       setFuture([]);
-      setPreview({ context, schedules: changed });
+      setPreview({ context, schedules: changed, rotation });
       setConfirmed(false);
       setMessage(
         `Alteração aplicada a ${chosen.length} dia(s) de ${changed.length} prévia(s). Confira os novos alertas.`,
@@ -233,7 +268,10 @@ export default function BulkSchedules({
     setError("");
     setMessage("");
     try {
-      await onSave(schedules);
+      await onSave(
+        schedules,
+        rotation ? rotationForTeamSchedules(schedules, rotation) : undefined,
+      );
       if (request.current !== id || activeContext.current !== expected) return;
       setPreview(null);
       setHistory([]);
@@ -386,15 +424,76 @@ export default function BulkSchedules({
               )}
             </div>
             <p className="muted mt-3">
+              {candidates.length} funcionário(s) ativo(s) na empresa · até 200
+              por lote. Gerar todos considera a empresa inteira, inclusive
+              pessoas fora dos filtros de pesquisa.
+            </p>
+            <p className="muted mt-3">
               Cada funcionário usa seu modelo e suas regras. Eventos e exceções
               individuais são conferidos separadamente. Gerar prévias não salva
               nem aprova escalas.
             </p>
+            <div className="team-generation-options mt-4">
+              <label className="check-label">
+                <input
+                  type="checkbox"
+                  checked={autoRotation}
+                  disabled={selectingLocked}
+                  onChange={(event) => setAutoRotation(event.target.checked)}
+                />
+                Distribuir automaticamente os selecionados em 12×36 nos grupos A
+                e B
+              </label>
+              <p className="muted mt-2">
+                Desmarcado: preserva os modelos individuais e os grupos já
+                cadastrados. Marcado: alterna as pessoas em 12×36 entre A/B,
+                equilibrando horários, setores e unidades quando houver pares;
+                os demais regimes mantêm seus modelos. A conferência inclui
+                funcionamento, pausas, contratos e CCT. Duplicar preserva os
+                modelos de origem.
+              </p>
+              {autoRotation && (
+                <label className="mt-3">
+                  Referência do grupo A no lote
+                  <input
+                    type="date"
+                    value={rotationReference}
+                    disabled={selectingLocked}
+                    max={dates.at(-1)}
+                    onChange={(event) =>
+                      setRotationReference(event.target.value)
+                    }
+                  />
+                </label>
+              )}
+            </div>
             <div className="actions mt-4">
               <button
                 type="button"
                 className="button primary"
-                disabled={selectingLocked || !selected.length || !validMonth}
+                disabled={
+                  selectingLocked ||
+                  !candidates.length ||
+                  candidates.length > 200 ||
+                  !validMonth
+                }
+                onClick={() => {
+                  const ids = candidates.map((employee) => employee.id);
+                  setSelection(ids);
+                  void generate("generate", ids);
+                }}
+              >
+                Gerar todos os funcionários ativos
+              </button>
+              <button
+                type="button"
+                className="button primary"
+                disabled={
+                  selectingLocked ||
+                  !selected.length ||
+                  selected.length > 200 ||
+                  !validMonth
+                }
                 onClick={() => void generate("generate")}
               >
                 <RefreshCw size={15} aria-hidden="true" />
@@ -510,7 +609,7 @@ export default function BulkSchedules({
               </table>
             </div>
             <CompanyCoverage
-              data={data}
+              data={reviewData}
               companyId={companyId}
               month={targetMonth}
               schedules={schedules}
@@ -589,6 +688,7 @@ export default function BulkSchedules({
                     setPreview({
                       context,
                       schedules: history[history.length - 1],
+                      rotation,
                     });
                     setHistory((current) => current.slice(0, -1));
                     setConfirmed(false);
@@ -606,6 +706,7 @@ export default function BulkSchedules({
                     setPreview({
                       context,
                       schedules: future[future.length - 1],
+                      rotation,
                     });
                     setFuture((current) => current.slice(0, -1));
                     setConfirmed(false);
@@ -621,6 +722,13 @@ export default function BulkSchedules({
               grupo(s) de avisos · {totals.pending} grupo(s) de fontes/regras
               pendentes. Salvar mantém essas ocorrências e não aprova o lote.
             </p>
+            {rotation && (
+              <p className="muted mt-3">
+                Este lote também vincula os modelos dos grupos A/B aos
+                funcionários em 12×36, mantendo a alternância nos próximos
+                meses. Os modelos originais são preservados.
+              </p>
+            )}
             <label className="check-label mt-4">
               <input
                 type="checkbox"

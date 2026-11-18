@@ -17,6 +17,8 @@ import { initialHolidays, initialModels, initialRules } from "./presets";
 import { missingReferenceRules } from "./legal-reference";
 import { rotationPayload, type RotationPlan } from "./rest-rotation";
 import { businessHoursPersistenceError } from "./business-hours";
+import { scheduleWriteItems } from "./schedule-write";
+import { teamGenerationPayload } from "./team-planning";
 export type AuditLog = {
   id: string;
   tabela: string;
@@ -304,22 +306,7 @@ export async function saveSchedules(
   if (!supabase) throw new Error("Supabase não configurado.");
   // The loaded API result also contains server metadata. Send only the
   // schedule fields the existing persistence RPC consumes.
-  const itens = schedules.map((schedule) => ({
-    id: schedule.id || null,
-    empresa_id: schedule.empresa_id,
-    funcionario_id: schedule.funcionario_id,
-    modelo_id: schedule.modelo_id,
-    mes: schedule.mes,
-    nome_funcionario: schedule.nome_funcionario,
-    modelo_nome: schedule.modelo_nome,
-    modelo_tipo: schedule.modelo_tipo,
-    dias: schedule.dias,
-    ...(schedule.revisao !== undefined
-      ? { revisao_esperada: schedule.revisao }
-      : !schedule.id
-        ? { revisao_esperada: null }
-        : {}),
-  }));
+  const itens = scheduleWriteItems(schedules);
   const { error } = companyId
     ? await supabase.rpc("salvar_escalas_empresa", {
         p_empresa: companyId,
@@ -350,6 +337,30 @@ export async function saveRestRotation(plan: RotationPlan) {
       );
     throw new Error(
       "Não foi possível salvar o revezamento. Confira a conexão e atualize os dados antes de tentar novamente.",
+    );
+  }
+}
+export async function saveTeamGeneration(
+  schedules: Schedule[],
+  rotation: RotationPlan,
+) {
+  if (!supabase) throw new Error("Supabase não configurado.");
+  const { error } = await supabase.rpc(
+    "salvar_planejamento_equipe",
+    teamGenerationPayload(schedules, rotation),
+  );
+  if (error) {
+    if (migrationError(error))
+      throw new Error(
+        "Planejamento automático ainda não ativado no banco. Execute ativar-planejamento-equipe.sql no Supabase. A prévia foi preservada.",
+      );
+    if (error.code === "P0001") throw new Error(error.message);
+    if (error.code === "42501")
+      throw new Error(
+        "Sua conta não tem permissão para salvar este planejamento.",
+      );
+    throw new Error(
+      "Não foi possível salvar o planejamento. Atualize os dados e confira a conexão antes de tentar novamente.",
     );
   }
 }

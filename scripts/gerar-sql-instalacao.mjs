@@ -48,6 +48,31 @@ for (const { file, sql } of migrations) {
 out += "\ncommit;\n";
 await mkdir("supabase/setup", { recursive: true });
 await writeFile("supabase/setup/instalacao-novo-projeto.sql", out);
+const activationFiles = new Set([
+  "202611180001_rest_rotation.sql",
+  "202611180002_company_business_hours.sql",
+  "202611180003_team_planning.sql",
+]);
+const incremental = migrations.filter(({ file }) => activationFiles.has(file));
+await writeFile(
+  "supabase/setup/ativar-planejamento-equipe.sql",
+  `-- ATUALIZAÇÃO INCREMENTAL PARA O BANCO EXISTENTE.
+-- Mantém registros, parâmetros legais e RLS. Novos horários continuam opcionais.
+-- Reúne somente as migrations operacionais de revezamento, funcionamento e planejamento.
+begin;
+select pg_advisory_xact_lock(hashtext('cont_contabil_planejamento_equipe'));
+do $base_existente$
+declare nome text;
+begin
+ foreach nome in array array[${names}] loop
+  if to_regclass('public.'||nome) is null then raise exception 'Tabela % ausente. Confira as migrations anteriores antes de ativar o planejamento.',nome; end if;
+  if not(select relrowsecurity from pg_class where oid=to_regclass('public.'||nome)) then raise exception 'RLS desativada em %. Revise a configuração antes de continuar.',nome; end if;
+ end loop;
+end $base_existente$;
+${incremental.map(({ file, sql }) => `\n-- Migration: ${file}\n${sql}`).join("\n")}
+commit;
+`,
+);
 await writeFile(
   "supabase/setup/verificar-banco-existente.sql",
   `-- Leitura apenas: não cria usuários, não muda registros nem permissões.
