@@ -2765,3 +2765,33 @@ html[data-theme="dark"]
 [data-theme="dark"] .auth-field-error {
   color: #ffb4a2;
 }
+
+.work-rest-cards {
+  display: grid;
+  gap: 16px;
+}
+.work-rest-card {
+  border: 1px solid var(--border, #dbe5f1);
+  padding: 16px;
+  border-radius: 12px;
+  min-width: 0;
+}
+.work-rest-dates {
+  display: grid;
+  gap: 6px;
+}
+.work-rest-dates dt {
+  font-weight: 600;
+}
+.work-rest-dates dd {
+  margin: 0 0 8px;
+  overflow-wrap: anywhere;
+  line-height: 1.7;
+}
+.work-rest-report .filters select {
+  max-width: 100%;
+}
+.work-rest-report .table-wrap {
+  max-width: 100%;
+  overflow: auto;
+}

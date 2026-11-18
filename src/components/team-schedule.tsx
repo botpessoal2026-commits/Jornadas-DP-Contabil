@@ -9,6 +9,7 @@ import {
 import { addDays, dateUTC, monday, monthDates } from "@/lib/engine";
 import type { Data } from "@/lib/store";
 import type { Employee } from "@/lib/types";
+import WorkRestReport from "./work-rest-report";
 import {
   filterTeamRows,
   teamScheduleRows,
@@ -357,6 +358,22 @@ export default function TeamSchedule({
           </button>
         </div>
       </div>
+      <details
+        className="panel-body border-t"
+        aria-label="Abrir relatório da equipe"
+      >
+        <summary className="font-semibold">
+          Relatório de dias trabalhados e folgas
+        </summary>
+        <div className="mt-4">
+          <WorkRestReport
+            data={data}
+            month={month}
+            companyId={companyId}
+            employeeIds={rows.map((row) => row.employee.id)}
+          />
+        </div>
+      </details>
       {rows.length ? (
         <div
           className="table-wrap team-table-wrap"

@@ -135,6 +135,7 @@ import TeamSchedule from "./team-schedule";
 import BulkSchedules from "./bulk-schedules";
 import EmployeeImport from "./employee-import";
 import ReportCenter from "./report-center";
+import WorkRestReport from "./work-rest-report";
 import WorkQueue from "./work-queue";
 import {
   resolvePublishedContext,
@@ -4774,6 +4775,18 @@ export default function Workspace() {
                   />
                 </Field>
               </div>
+              <section className="panel mb-5">
+                <div className="panel-head">
+                  <h2>Dias trabalhados e folgas</h2>
+                </div>
+                <div className="panel-body">
+                  <WorkRestReport
+                    data={data}
+                    month={month}
+                    companyId={companyScopeId}
+                  />
+                </div>
+              </section>
               <ReportCenter
                 key={`${companyScopeId ?? "all"}:${month}`}
                 data={data}
