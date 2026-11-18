@@ -32,7 +32,7 @@ O fluxo por e-mail não exige novas tabelas ou alteração de credenciais. As ta
 
 ### Projeto novo e vazio
 
-Execute **`supabase/setup/instalacao-novo-projeto.sql`**. O arquivo reúne as 11 migrations versionadas em uma transação, com tabelas, RPCs, políticas e registro de histórico para compatibilidade com futuras migrations pelo CLI. Recusa a execução se encontrar tabelas do aplicativo, evitando sobrescrever uma base existente. Em caso de falha, a transação deve ser revertida; não pule os testes de segurança nem apague tabelas para contornar o erro.
+Execute **`supabase/setup/instalacao-novo-projeto.sql`**. O arquivo reúne as migrations versionadas em uma transação, com tabelas, RPCs, políticas e registro de histórico para compatibilidade com futuras migrations pelo CLI. Recusa a execução se encontrar tabelas do aplicativo, evitando sobrescrever uma base existente. Em caso de falha, a transação deve ser revertida; não pule os testes de segurança nem apague tabelas para contornar o erro.
 
 Os SQLs são gerados a partir dos arquivos originais por `node scripts/gerar-sql-instalacao.mjs`. Nenhuma migration histórica ou regra legal foi modificada.
 

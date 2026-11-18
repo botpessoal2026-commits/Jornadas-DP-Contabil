@@ -136,6 +136,14 @@ import BulkSchedules from "./bulk-schedules";
 import EmployeeImport from "./employee-import";
 import ReportCenter from "./report-center";
 import WorkRestReport from "./work-rest-report";
+import RestRotation from "./rest-rotation";
+import {
+  applyRotationLocally,
+  rotationData,
+  type RotationPlan,
+} from "@/lib/rest-rotation";
+import { reviewBulkSchedules } from "@/lib/schedule-bulk";
+import { saveRestRotation } from "@/lib/store";
 import WorkQueue from "./work-queue";
 import {
   resolvePublishedContext,
@@ -494,6 +502,7 @@ export default function Workspace() {
     future: Schedule[];
   }>({ past: [], future: [] });
   const [bulkDirty, setBulkDirty] = useState(false);
+  const [rotationDirty, setRotationDirty] = useState(false);
   const [operationDirty, setOperationDirty] = useState(false);
   const [bulkEpoch, setBulkEpoch] = useState(0);
   const [scheduleView, setScheduleView] = useState<"individual" | "team">(
@@ -567,6 +576,7 @@ export default function Workspace() {
     modalChanged.current = false;
     setBulkEpoch((value) => value + 1);
     setBulkDirty(false);
+    setRotationDirty(false);
     setOperationDirty(false);
     setCompanyScopeId(location.companyId);
     setCompanyId(location.companyId ?? "");
@@ -606,14 +616,20 @@ export default function Workspace() {
   }
   useEffect(() => {
     const leave = (e: BeforeUnloadEvent) => {
-      if (dirty || bulkDirty || operationDirty || modalChanged.current) {
+      if (
+        dirty ||
+        bulkDirty ||
+        rotationDirty ||
+        operationDirty ||
+        modalChanged.current
+      ) {
         e.preventDefault();
         e.returnValue = "";
       }
     };
     window.addEventListener("beforeunload", leave);
     return () => window.removeEventListener("beforeunload", leave);
-  }, [dirty, bulkDirty, operationDirty]);
+  }, [dirty, bulkDirty, rotationDirty, operationDirty]);
   useEffect(() => {
     if (!toast) return;
     const t = setTimeout(() => setToast(null), 9000);
@@ -751,7 +767,13 @@ export default function Workspace() {
         return;
       }
       const next = parseWorkspaceLocation(window.location.search);
-      if (dirty || bulkDirty || operationDirty || modalChanged.current) {
+      if (
+        dirty ||
+        bulkDirty ||
+        rotationDirty ||
+        operationDirty ||
+        modalChanged.current
+      ) {
         window.history.pushState(null, "", currentHref.current);
         setConfirmation({
           title: "Descartar alterações não salvas?",
@@ -763,7 +785,7 @@ export default function Workspace() {
     };
     window.addEventListener("popstate", pop);
     return () => window.removeEventListener("popstate", pop);
-  }, [dirty, bulkDirty, operationDirty]);
+  }, [dirty, bulkDirty, rotationDirty, operationDirty]);
   useEffect(() => {
     if (!companyId && data.companies.length) setCompanyId(data.companies[0].id);
   }, [data, companyId, modelId]);
@@ -1180,6 +1202,7 @@ export default function Workspace() {
       setModal(null);
       modalChanged.current = false;
       setBulkDirty(false);
+      setRotationDirty(false);
       setOperationDirty(false);
       setBulkEpoch((value) => value + 1);
       setRecovery(null);
@@ -1189,11 +1212,18 @@ export default function Workspace() {
       setSaveState("idle");
       setActiveDate(null);
       setBulkDirty(false);
+      setRotationDirty(false);
       setOperationDirty(false);
       setBulkEpoch((value) => value + 1);
       modalChanged.current = false;
     };
-    if (dirty || bulkDirty || operationDirty || modalChanged.current)
+    if (
+      dirty ||
+      bulkDirty ||
+      rotationDirty ||
+      operationDirty ||
+      modalChanged.current
+    )
       setConfirmation({
         title: "Descartar alterações não salvas?",
         message:
@@ -2521,6 +2551,30 @@ export default function Workspace() {
     }
     return results;
   }
+  async function persistRestRotation(plan: RotationPlan) {
+    if (readbackPending || commitReadbackPending.current)
+      throw new Error("Atualize os dados antes de salvar outro revezamento.");
+    if (!companyScopeId || plan.companyId !== companyScopeId)
+      throw new Error("O revezamento deve pertencer à empresa ativa.");
+    const expected = activeDataContext.current;
+    const checked = reviewBulkSchedules(
+      rotationData(data, plan),
+      plan.schedules,
+    );
+    if (checked.some((item) => item.error))
+      throw new Error("Confira os dados das prévias antes de salvar.");
+    if (demo) setData((current) => applyRotationLocally(current, plan));
+    else {
+      await saveRestRotation(plan);
+      commitReadbackPending.current = true;
+      if (!(await refreshAfterCommit(expected, "Gravação do revezamento")))
+        return;
+    }
+    assertDataContext(expected);
+    notify(
+      "Revezamento e modelos individuais salvos. Confira os alertas antes de aprovar.",
+    );
+  }
   async function importEmployees(items: Employee[]) {
     if (!scopedCompany || (scopedCompany.situacao ?? "ativa") !== "ativa")
       throw new Error("Abra uma empresa ativa para importar.");
@@ -3108,6 +3162,7 @@ export default function Workspace() {
                 if (
                   (dirty ||
                     bulkDirty ||
+                    rotationDirty ||
                     operationDirty ||
                     modalChanged.current) &&
                   !window.confirm("Sair e descartar alterações não salvas?")
@@ -3123,6 +3178,7 @@ export default function Workspace() {
                 setModal(null);
                 modalChanged.current = false;
                 setBulkDirty(false);
+                setRotationDirty(false);
                 setOperationDirty(false);
                 setBulkEpoch((value) => value + 1);
                 setRecovery(null);
@@ -3668,6 +3724,22 @@ export default function Workspace() {
                   </div>
                 </div>
               </div>
+              <details className="panel mb-5">
+                <summary className="panel-body font-semibold">
+                  Revezar folgas 12×36 — grupos A e B
+                </summary>
+                <RestRotation
+                  key={`rotation:${companyScopeId}:${month}:${bulkEpoch}`}
+                  data={data}
+                  companyId={companyScopeId}
+                  month={month}
+                  busy={busy || readbackPending}
+                  onDirtyChange={setRotationDirty}
+                  onSave={(plan) =>
+                    scopedAction(() => persistRestRotation(plan))
+                  }
+                />
+              </details>
               <details className="panel mb-4">
                 <summary className="panel-head">
                   Gerar, editar e duplicar escalas em lote

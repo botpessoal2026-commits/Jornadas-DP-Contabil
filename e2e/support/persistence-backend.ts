@@ -38,6 +38,8 @@ export async function backend(page: Page, legacy = false) {
   const writes: string[] = [];
   const unexpected: string[] = [];
   const signups: Row[] = [];
+  const rotations: Row[] = [];
+  let rotationUnavailable = false;
   let failReadback = false;
   let failNextWriteReadback = false;
   const user = (id: string) => {
@@ -216,6 +218,73 @@ export async function backend(page: Page, legacy = false) {
         writes.push(name);
         return respond(route, rowId);
       }
+      if (rpc === "salvar_revezamento_12x36") {
+        rotations.push(body);
+        if (rotationUnavailable)
+          return respond(
+            route,
+            { code: "PGRST202", message: "Function not found" },
+            404,
+          );
+        const next = structuredClone(tables);
+        if (
+          !next.empresas.some(
+            (company) =>
+              company.id === body.p_empresa && company.user_id === id,
+          )
+        )
+          return respond(route, { message: "Sem permissão" }, 403);
+        for (const item of body.p_modelos as Row[]) {
+          const destination = item.destino as Row;
+          if (
+            !next.modelos_jornada.some((model) => model.id === destination.id)
+          )
+            next.modelos_jornada.push({ ...destination, user_id: id });
+        }
+        for (const assignment of body.p_vinculos as Row[]) {
+          const employee = next.funcionarios.find(
+            (item) =>
+              item.id === assignment.funcionario_id &&
+              item.empresa_id === body.p_empresa &&
+              item.user_id === id,
+          );
+          if (
+            !employee ||
+            (employee.modelo_padrao_id ?? null) !==
+              assignment.modelo_padrao_esperado_id
+          )
+            return respond(route, { message: "Vínculo alterado" }, 409);
+          employee.modelo_padrao_id = assignment.modelo_id;
+        }
+        for (const item of body.itens as Row[]) {
+          const old = next.escalas.find(
+            (schedule) =>
+              schedule.funcionario_id === item.funcionario_id &&
+              schedule.mes === item.mes &&
+              schedule.user_id === id,
+          );
+          if (
+            old &&
+            ["aprovada", "publicada", "fechada"].includes(String(old.status))
+          )
+            return respond(route, { message: "Escala bloqueada" }, 409);
+          next.escalas = next.escalas.filter((schedule) => schedule !== old);
+          next.escalas.push({
+            ...item,
+            id: old?.id ?? randomUUID(),
+            user_id: id,
+            status: "rascunho",
+            revisao: Number(old?.revisao ?? -1) + 1,
+          });
+        }
+        Object.assign(tables, next);
+        writes.push("revezamento");
+        if (failNextWriteReadback) {
+          failReadback = true;
+          failNextWriteReadback = false;
+        }
+        return respond(route, null);
+      }
       if (rpc === "salvar_escalas" || rpc === "salvar_escalas_empresa") {
         for (const item of body.itens as Row[]) {
           if (
@@ -287,6 +356,10 @@ export async function backend(page: Page, legacy = false) {
     writes,
     unexpected,
     signups,
+    rotations,
+    setRotationUnavailable: (value: boolean) => {
+      rotationUnavailable = value;
+    },
     sessionFor: session,
     confirmEmail: (email: string) => {
       const found = users.find((u) => u.email === email);
